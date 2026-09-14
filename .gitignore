@@ -1,0 +1,46 @@
+# --- Python ---
+ai4s/.venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+ai4s/outputs/demo_log_raw.txt
+
+# --- R / Quarto ---
+.Rproj.user/
+.Rhistory
+.RData
+*_cache/
+*_files/
+*.rmarkdown
+/.quarto/
+# rendered pages are published from docs/ (GitHub Pages), not from here
+flood_ai4s.html
+ai4s/AI4S_REPORT.html
+# earlier RW2 temporal prototype, depends on an intermediate CSV
+flood project.qmd
+
+# --- raw / intermediate data (only the processed dataset ships with the repo) ---
+111.csv
+Cleaned_*.csv
+Combined_Dataset.csv
+Final_Combined_CSV_Data.csv
+Merged_CSV_Data.csv
+New_Combined_Sea_Level_Data.csv
+FIJI.csv
+KIRIBATI.csv
+MARSHALL\ ISLANDS.csv
+MICRONESIA.csv
+NAURU.csv
+PAPUA\ NEW\ GUINEA.csv
+SAMOA.csv
+SOLOMON\ ISLANDS.csv
+TONGA.csv
+TUVALU.csv
+VANUATU.csv
+cook\ island.csv
+IDO70054SLD.csv
+*.docx
+
+# --- OS ---
+.DS_Store

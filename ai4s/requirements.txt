@@ -1,0 +1,8 @@
+gymnasium>=1.0
+botorch>=0.12
+stable-baselines3>=2.3
+optuna>=3.6
+pandas
+scipy
+matplotlib
+anthropic>=1.0   # only for the optional live Claude agent (llm_agent.py --live)

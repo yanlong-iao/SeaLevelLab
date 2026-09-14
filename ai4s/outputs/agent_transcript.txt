@@ -1,0 +1,26 @@
+Goal:       Characterise the Pacific sea-level-rise field with 15 experiments and locate the highest-risk site.
+Thought:    I need the lab's state before spending budget: bounds, existing gauges, current uncertainty.
+Action:     describe_lab()
+Observation:{"gp_hyper": {"lengthscale_unit": 0.153, "lengthscale_deg_lon": 10.7, "inla_practical_range_unit": 0.305, "signal_sd": 1.72, "noise_sd": 1.106, "mean_mm_yr": 5.162, "nu": 1.5}, "budget_left": 15, "top_uncertainty": {"lon": 210.0, "lat": 12.0, "posterior_sd": 1.72}}
+Thought:    IPV is still 1.000 of the prior and the least-known cell is (210.0E, 12.0) with sd 1.72 mm/yr (1.00 signal-sd). Spend 3 experiments on active learning.
+Action:     run_bo_campaign(mode='active_learning', n_experiments=3)
+Observation:{"ran": 3, "mode": "active_learning", "ipv_fraction_before": 1.0, "ipv_fraction_after": 0.899, "belief": {"budget_left": 12, "ipv_fraction_remaining": 0.899, "best_measured_mm_yr": 7.45, "best_measured_at_deg": [197.4, 1.7]}}
+Thought:    IPV fell 1.000 -> 0.899: 3.4% of prior variance per experiment -- still worth it.
+Thought:    IPV is still 0.899 of the prior and the least-known cell is (210.0E, 12.0) with sd 1.71 mm/yr (0.99 signal-sd). Spend 3 experiments on active learning.
+Action:     run_bo_campaign(mode='active_learning', n_experiments=3)
+Observation:{"ran": 3, "mode": "active_learning", "ipv_fraction_before": 0.899, "ipv_fraction_after": 0.825, "belief": {"budget_left": 9, "ipv_fraction_remaining": 0.825, "best_measured_mm_yr": 7.82, "best_measured_at_deg": [204.5, 7.6]}}
+Thought:    IPV fell 0.899 -> 0.825: 2.5% of prior variance per experiment -- still worth it.
+Thought:    IPV is still 0.825 of the prior and the least-known cell is (140.0E, -25.0) with sd 1.65 mm/yr (0.96 signal-sd). Spend 3 experiments on active learning.
+Action:     run_bo_campaign(mode='active_learning', n_experiments=3)
+Observation:{"ran": 3, "mode": "active_learning", "ipv_fraction_before": 0.825, "ipv_fraction_after": 0.767, "belief": {"budget_left": 6, "ipv_fraction_remaining": 0.767, "best_measured_mm_yr": 7.82, "best_measured_at_deg": [204.5, 7.6]}}
+Thought:    IPV fell 0.825 -> 0.767: 1.9% of prior variance per experiment -- still worth it.
+Thought:    Uncertainty is acceptable; the belief predicts the highest rise rate near (190.9E, -14.9) (7.44 +/- 1.02 mm/yr). Switch objective to hot-spot search with the remaining 6 experiments.
+Action:     run_bo_campaign(mode='optimization', n_experiments=6)
+Observation:{"ran": 6, "mode": "optimization", "ipv_fraction_before": 0.767, "ipv_fraction_after": 0.734, "belief": {"budget_left": 0, "ipv_fraction_remaining": 0.734, "best_measured_mm_yr": 8.01, "best_measured_at_deg": [208.4, 9.8]}}
+Thought:    Best measured rate 8.01 mm/yr at [208.4, 9.8]. Check surrogate physics before reporting.
+Action:     surrogate_hyperparameters()
+Observation:{"lengthscale_unit": [0.123, 0.172], "lengthscale_deg": [8.6, 6.4], "outputscale": 0.506, "noise": 0.3636}
+Thought:    Refit length-scales [8.6, 6.4] deg vs prior 10.7 deg: consistent with the basin-scale coherence (ENSO/PDO) assumed by the twin.
+Action:     final_report()
+Observation:{"mode": "optimization", "n_experiments": 15, "budget_left": 0, "ipv_fraction_remaining": 0.734, "uncertainty_hotspots": [{"lon": 140.0, "lat": -25.0, "posterior_sd": 1.65}, {"lon": 210.0, "lat": -25.0, "posterior_sd": 1.61}, {"lon": 171.8, "lat": -25.0, "posterior_sd": 1.6}], "predicted_peaks": [{"lon": 210.0, "lat": 8.6, "posterior_mean": 7.19, "posterior_sd": 0.8}, {"lon": 190.9, "lat": -14.9, 
+Answer:     Campaign complete: 15 experiments, IPV reduced to 0.734 of start, hot-spot 8.01 mm/yr at [208.4, 9.8].

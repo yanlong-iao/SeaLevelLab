@@ -1,0 +1,55 @@
+{
+ "active_learning": {
+  "Random": {
+   "metric": "ipv_fraction",
+   "mean": 0.8150539429574318,
+   "sd": 0.044862231601506486,
+   "total_reward": 0.034946057042568174,
+   "best_y": 6.8398798593505905
+  },
+  "SB3-PPO": {
+   "metric": "ipv_fraction",
+   "mean": 0.9572720215073466,
+   "sd": 0.0002643181010911766,
+   "total_reward": -0.10727202150734658,
+   "best_y": 5.640575512702822
+  },
+  "BoTorch": {
+   "metric": "ipv_fraction",
+   "mean": 0.6817486621328033,
+   "sd": 0.001988290892418254,
+   "total_reward": 0.1682513378671967,
+   "best_y": 8.180126944581136
+  }
+ },
+ "optimization": {
+  "Random": {
+   "metric": "simple_regret",
+   "mean": 2.4556937050904177,
+   "sd": 1.7405863816364877,
+   "total_reward": 0.8257270904141851,
+   "best_y": 6.8398798593505905
+  },
+  "Optuna-GP": {
+   "metric": "simple_regret",
+   "mean": 2.293698534519175,
+   "sd": 0.6198735203179884,
+   "total_reward": 0.9274319239353839,
+   "best_y": 7.014782058164719
+  },
+  "SB3-PPO": {
+   "metric": "simple_regret",
+   "mean": 3.9840348770353162,
+   "sd": 0.4375638754161568,
+   "total_reward": 0.2942533470672134,
+   "best_y": 5.9259023903841275
+  },
+  "BoTorch": {
+   "metric": "simple_regret",
+   "mean": 1.7193477679014384,
+   "sd": 0.4831617469340417,
+   "total_reward": 1.1055676555170642,
+   "best_y": 7.321122770423051
+  }
+ }
+}

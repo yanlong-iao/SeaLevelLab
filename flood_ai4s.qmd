@@ -1,0 +1,472 @@
+---
+title: "SeaLevelLab: from an INLA spatial model to a self-driving laboratory"
+subtitle: "Pacific sea-level rise · Bayesian optimisation · reinforcement-learning view · LLM agent"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    code-fold: show
+    code-tools: true
+    embed-resources: true
+    fig-width: 8
+    fig-height: 5
+editor: visual
+execute:
+  warning: false
+  message: false
+---
+
+```{r setup}
+#| code-fold: true
+###########################
+## 0. 环境 / packages
+###########################
+# Must come before any library loads.  INLA (R) and torch (Python, via reticulate) each bring their own
+# OpenMP runtime; two copies in one process segfault on macOS.  These two lines let them coexist.
+Sys.setenv(KMP_DUPLICATE_LIB_OK = "TRUE", OMP_NUM_THREADS = "1")
+suppressPackageStartupMessages({
+  library(INLA)      # SPDE / Bayesian spatial model (the original analysis)
+  library(dplyr)
+  library(ggplot2)
+  library(viridis)
+  library(plotly)    # interactive 3D surfaces
+  library(R6)        # a Gymnasium-style environment class in R
+  library(jsonlite)  # tool results for the LLM agent
+})
+set.seed(2026)
+theme_set(theme_minimal(base_size = 12))
+
+# Study box (degrees).  Longitudes mapped to [0, 360) because the data straddle the antimeridian.
+LON <- c(140, 210); LAT <- c(-25, 12)
+to_unit    <- function(lon, lat) cbind((lon - LON[1]) / diff(LON), (lat - LAT[1]) / diff(LAT))
+to_degrees <- function(x) cbind(LON[1] + x[, 1] * diff(LON), LAT[1] + x[, 2] * diff(LAT))
+```
+
+# Part 1 · The original analysis, upgraded (R-INLA SPDE)
+
+The starting point is the model in `flood_final.qmd`: a Matérn latent field fitted with INLA to monthly mean sea level at 13 Pacific tide gauges. Two upgrades here: the data cleaning is explicit (string-typed numerics, a `Year = 239890` row, duplicated station-months), and the field is **projected onto a grid** so we can draw the posterior mean and sd as surfaces instead of points.
+
+```{r data}
+###########################
+## 1. 读取并清洗数据
+###########################
+raw <- read.csv("Processed_Final_data.csv")
+data <- raw |>
+  mutate(across(c(Month, Year, Mean, Std_Dev), ~ suppressWarnings(as.numeric(.x)))) |>
+  filter(!is.na(Mean), !is.na(Std_Dev), !is.na(Latitude), !is.na(Longitude),
+         between(Year, 1990, 2030), between(Month, 1, 12)) |>
+  distinct(Location, Year, Month, .keep_all = TRUE) |>
+  mutate(t = Year + (Month - 0.5) / 12,
+         lon360 = ifelse(Longitude < 0, Longitude + 360, Longitude))
+cat(nrow(raw), "raw rows ->", nrow(data), "clean rows,", n_distinct(data$Location), "stations\n")
+```
+
+```{r inla-fit}
+#| cache: true
+###########################
+## 2. Mesh + SPDE + INLA  (same model as flood_final.qmd)
+###########################
+n.sample <- 3000
+data_sub <- data[sample(nrow(data), n.sample), ]
+points   <- jitter(as.matrix(data_sub[, c("lon360", "Latitude")]), amount = 1e-5)
+
+mesh <- inla.mesh.2d(loc = points, cutoff = 2.0, max.edge = c(5, 6), offset = c(1, 3))
+spde <- inla.spde2.matern(mesh, alpha = 2)      # alpha = 2  ->  Matern smoothness nu = alpha - d/2 = 1
+A    <- inla.spde.make.A(mesh, loc = points)
+mesh.index <- inla.spde.make.index("field", n.spde = mesh$n)
+
+stack <- inla.stack(data = list(y = data_sub$Mean), A = list(A, 1),
+                    effects = list(c(mesh.index, list(intercept = 1)), list(covar = data_sub$Std_Dev)),
+                    tag = "est")
+formula <- y ~ -1 + intercept + covar + f(field, model = spde)
+fit <- inla(formula, data = inla.stack.data(stack, spde = spde), family = "normal",
+            control.predictor = list(A = inla.stack.A(stack), compute = TRUE),
+            control.inla = list(strategy = "gaussian", int.strategy = "eb"))   # eb = empirical Bayes = type-II ML
+
+spde.res <- inla.spde2.result(fit, "field", spde)
+inla_range <- inla.emarginal(function(x) x, spde.res$marginals.range.nominal[[1]])
+inla_sigma <- sqrt(inla.emarginal(function(x) x, spde.res$marginals.variance.nominal[[1]]))
+cat(sprintf("INLA posterior: practical range = %.1f deg, field sd = %.3f m, Gaussian noise sd = %.3f m\n",
+            inla_range, inla_sigma, 1 / sqrt(fit$summary.hyperpar["Precision for the Gaussian observations", "mean"])))
+```
+
+```{r inla-surfaces}
+###########################
+## 3. Project the latent field onto a grid -> posterior mean & sd surfaces
+###########################
+proj <- inla.mesh.projector(mesh, xlim = LON, ylim = LAT, dims = c(80, 60))
+field_mean <- inla.mesh.project(proj, fit$summary.random$field$mean) + fit$summary.fixed["intercept", "mean"]
+field_sd   <- inla.mesh.project(proj, fit$summary.random$field$sd)
+stations <- data |> group_by(Location) |> summarise(lon = first(lon360), lat = first(Latitude), mean_m = mean(Mean), .groups = "drop")
+
+grid_df <- expand.grid(lon = proj$x, lat = proj$y) |> mutate(mean = as.vector(field_mean), sd = as.vector(field_sd))
+p_mean <- ggplot(grid_df, aes(lon, lat, fill = mean)) + geom_raster() + scale_fill_viridis_c(name = "m") +
+  geom_point(data = stations, aes(lon, lat), inherit.aes = FALSE, shape = 24, fill = "white", size = 2.5) +
+  coord_fixed() + labs(title = "INLA posterior mean of sea level (datum-relative, m)")
+p_sd <- ggplot(grid_df, aes(lon, lat, fill = sd)) + geom_raster() + scale_fill_viridis_c(option = "magma", name = "m") +
+  geom_point(data = stations, aes(lon, lat), inherit.aes = FALSE, shape = 24, fill = "white", size = 2.5) +
+  coord_fixed() + labs(title = "INLA posterior sd (this map is the fuel of every acquisition function)")
+gridExtra::grid.arrange(p_mean, p_sd, ncol = 2)
+```
+
+```{r inla-3d}
+###########################
+## 4. 3D: the posterior mean surface, coloured by posterior sd
+###########################
+plot_ly() |>
+  add_surface(x = proj$x, y = proj$y, z = t(field_mean), surfacecolor = t(field_sd),
+              colorscale = "Viridis", colorbar = list(title = "posterior sd (m)")) |>
+  add_markers(data = stations, x = ~lon, y = ~lat, z = ~mean_m, text = ~Location,
+              marker = list(color = "white", size = 5, line = list(color = "black", width = 1)), name = "13 gauges") |>
+  layout(title = "INLA latent field: height = posterior mean, colour = posterior sd",
+         scene = list(xaxis = list(title = "longitude (deg E)"), yaxis = list(title = "latitude"), zaxis = list(title = "sea level (m)")))
+```
+
+::: callout-note
+**What a reviewer notices.** Only 13 distinct locations exist, so the field is effectively a 13-level random effect; time is ignored; and `Mean` is relative to each gauge's own datum (Fiji 1.28 m vs Solomon 0.71 m is a datum offset, not oceanography). Those three seams are exactly where the AI4S version starts.
+:::
+
+# Part 2 · The target property: sea-level *rise rate*
+
+For a self-driving lab we need a comparable physical quantity to optimise. Per station we fit `Mean ~ trend + annual cycle` and keep the trend in mm/yr.
+
+```{r rates}
+rates <- data |> group_by(Location) |> group_modify(~ {
+  m <- lm(Mean ~ I(t - 2000) + sin(2 * pi * t) + cos(2 * pi * t), data = .x)
+  tibble(lon = first(.x$lon360), lat = first(.x$Latitude), n_months = nrow(.x),
+         trend_mm_yr = 1000 * coef(m)[[2]], resid_sd_m = sd(resid(m)))
+}) |> ungroup() |> arrange(desc(trend_mm_yr))
+knitr::kable(rates, digits = 2, caption = "Sea-level rise rate per gauge, 1992-2025 (Samoa: post-2009 earthquake subsidence)")
+ggplot(rates, aes(reorder(Location, trend_mm_yr), trend_mm_yr)) + geom_col(fill = "#0E7A8A") + coord_flip() +
+  labs(x = NULL, y = "mm / yr", title = "Target property: rise rate")
+```
+
+# Part 3 · The Math Bridge in code: the SPDE field *is* a Gaussian process
+
+Lindgren, Rue & Lindström (2011): the SPDE $(\kappa^2-\Delta)^{\alpha/2}(\tau u)=\mathcal W$ has a GP solution with Matérn covariance and practical range $\rho=\sqrt{8\nu}/\kappa$. Below is that GP written explicitly (dense covariance instead of INLA's sparse precision), fitted by **type-II MAP**: the same estimator as INLA's `int.strategy = "eb"` plus its PC priors, and the same estimator BoTorch's `fit_gpytorch_mll` uses.
+
+```{r gp-engine}
+#| code-fold: true
+###########################
+## 5. A Matern-3/2 Gaussian process, from scratch (~40 lines)
+###########################
+k_matern <- function(A, B, ls, sig) {              # Matern nu = 3/2 (closed form)
+  d <- sqrt(outer(A[, 1], B[, 1], "-")^2 + outer(A[, 2], B[, 2], "-")^2)
+  s <- sqrt(3) * d / ls
+  sig^2 * (1 + s) * exp(-s)
+}
+gp_post <- function(X, y, Xs, h, full = FALSE) {  # posterior mean / sd (/ cov) at Xs
+  if (nrow(X) == 0) { K <- k_matern(Xs, Xs, h$ls, h$sig); mu <- rep(h$mean, nrow(Xs))
+    return(if (full) list(mu = mu, cov = K) else list(mu = mu, sd = sqrt(diag(K)))) }
+  K  <- k_matern(X, X, h$ls, h$sig) + diag(h$noise^2 + 1e-8, nrow(X))
+  L  <- chol(K)
+  a  <- backsolve(L, forwardsolve(t(L), y - h$mean))
+  Ks <- k_matern(Xs, X, h$ls, h$sig)
+  mu <- h$mean + Ks %*% a
+  V  <- forwardsolve(t(L), t(Ks))
+  cov <- k_matern(Xs, Xs, h$ls, h$sig) - crossprod(V)
+  if (full) list(mu = as.vector(mu), cov = cov) else list(mu = as.vector(mu), sd = sqrt(pmax(diag(cov), 1e-12)))
+}
+gp_lml <- function(X, y, h) {                      # log marginal likelihood
+  K <- k_matern(X, X, h$ls, h$sig) + diag(h$noise^2 + 1e-8, nrow(X)); L <- chol(K)
+  r <- y - h$mean; a <- backsolve(L, forwardsolve(t(L), r))
+  -0.5 * sum(r * a) - sum(log(diag(L))) - 0.5 * length(y) * log(2 * pi)
+}
+gp_fit <- function(X, y, prior = list(ls = c(log(0.25), 0.5), noise = c(log(0.8), 0.5))) {
+  # Type-II MAP: maximise log-likelihood + log-prior.  With 13 sites the range and the nugget are only
+  # jointly identifiable (Zhang 2004); INLA guards this with PC priors, we use log-normal priors.
+  obj <- function(th) { h <- list(ls = exp(th[1]), sig = exp(th[2]), noise = exp(th[3]), mean = mean(y))
+    -gp_lml(X, y, h) + 0.5 * ((th[1] - prior$ls[1]) / prior$ls[2])^2 + 0.5 * ((th[3] - prior$noise[1]) / prior$noise[2])^2 }
+  best <- NULL
+  for (i in 1:10) { th0 <- c(log(runif(1, .1, .6)), log(sd(y) * runif(1, .5, 1.5)), log(sd(y) * runif(1, .1, .6)))
+    o <- optim(th0, obj, method = "L-BFGS-B", lower = log(c(.05, .01, .01)), upper = log(c(2, 50, 10)))
+    if (is.null(best) || o$value < best$value) best <- o }
+  list(ls = exp(best$par[1]), sig = exp(best$par[2]), noise = exp(best$par[3]), mean = mean(y))
+}
+```
+
+```{r gp-fit}
+X_st <- to_unit(rates$lon, rates$lat); y_st <- rates$trend_mm_yr
+hyp  <- gp_fit(X_st, y_st)
+bridge <- tibble(
+  quantity  = c("practical range (deg lon)", "field sd", "noise sd", "estimator"),
+  `INLA (Part 1, sea level in m)` = c(sprintf("%.1f", inla_range), sprintf("%.3f m", inla_sigma), "Gaussian precision", "int.strategy = 'eb' + PC priors"),
+  `GP surrogate (rise rate, mm/yr)` = c(sprintf("%.1f  (lengthscale %.3f x sqrt(8*1.5)/sqrt(3))", hyp$ls * diff(LON) * 2, hyp$ls),
+                                        sprintf("%.2f mm/yr", hyp$sig), sprintf("%.2f mm/yr", hyp$noise), "type-II MAP (optim) = BoTorch fit_gpytorch_mll"))
+knitr::kable(bridge, caption = "Same mathematical object, two names")
+```
+
+```{r gp-3d}
+###########################
+## 6. 3D: GP posterior of the rise-rate field given the 13 gauges
+###########################
+G <- 40; g <- seq(0, 1, length.out = G); grid <- as.matrix(expand.grid(x = g, y = g)); grid_deg <- to_degrees(grid)
+post0 <- gp_post(X_st, y_st, grid, hyp)
+surf <- function(v) matrix(v, G, G)                     # grid is x-fastest -> matrix[x, y]
+plot_ly() |>
+  add_surface(x = unique(grid_deg[, 1]), y = unique(grid_deg[, 2]), z = t(surf(post0$mu)), surfacecolor = t(surf(post0$sd)),
+              colorscale = "Viridis", colorbar = list(title = "posterior sd")) |>
+  add_markers(data = rates, x = ~lon, y = ~lat, z = ~trend_mm_yr, text = ~Location,
+              marker = list(color = "white", size = 5, line = list(color = "black", width = 1)), name = "gauges") |>
+  layout(title = "GP surrogate: height = predicted rise rate (mm/yr), colour = uncertainty",
+         scene = list(xaxis = list(title = "lon"), yaxis = list(title = "lat"), zaxis = list(title = "mm / yr")))
+```
+
+# Part 4 · Digital twin + a Gymnasium-style environment (in R)
+
+A self-driving lab needs a simulator before it touches hardware. The **twin** draws a hidden truth from the GP posterior (so it honours the 13 gauges but has unknown structure between them). The **environment** follows the Gymnasium contract: `reset()` and `step(action)` returning `obs, reward, terminated, info`.
+
+| MDP element | Definition |
+|----|----|
+| hidden state | the true rise-rate field $f$ (mm/yr) |
+| state (belief) | GP posterior mean & sd on the grid + budget left: a sufficient statistic of the history, so the POMDP becomes a belief-MDP |
+| action | $(\text{lon}, \text{lat}) \in [0,1]^2$: where to run the next experiment |
+| reward, `active_learning` | $(\mathrm{IPV}_{t-1}-\mathrm{IPV}_t)/\mathrm{IPV}_0 - c$: integrated posterior variance removed (A-optimal design) |
+| reward, `optimization` | $\max(0, y_t-\text{best}_{t-1})/\sigma_f - c$: improvement of the best measured rate |
+| transition | run the experiment, then Bayes' rule on the GP |
+| episode end | experiment budget exhausted |
+
+```{r env}
+#| code-fold: true
+###########################
+## 7. SeaLevelLab: an R6 environment with the Gymnasium API
+###########################
+SeaLevelLab <- R6Class("SeaLevelLab", public = list(
+  hyp = NULL, grid = NULL, X_prior = NULL, y_prior = NULL, mode = NULL, budget = NULL, cost = NULL, noise = NULL,
+  truth = NULL, X = NULL, y = NULL, t = 0, ipv0 = NA, ipv = NA, best_y = NA, best_x = NULL, history = NULL,
+  initialize = function(hyp, grid, X_prior, y_prior, mode = "active_learning", budget = 15, cost = 0.01, noise_sd = 0.6) {
+    self$hyp <- hyp; self$grid <- grid; self$X_prior <- X_prior; self$y_prior <- y_prior
+    self$mode <- mode; self$budget <- budget; self$cost <- cost; self$noise <- noise_sd },
+  reset = function(seed = NULL, warm_start = (self$mode == "active_learning")) {
+    if (!is.null(seed)) set.seed(seed)
+    p <- gp_post(self$X_prior, self$y_prior, self$grid, self$hyp, full = TRUE)          # twin: one posterior draw
+    self$truth <- as.vector(p$mu + t(chol(p$cov + diag(1e-6, nrow(p$cov)))) %*% rnorm(nrow(p$cov)))
+    self$X <- if (warm_start) self$X_prior else matrix(numeric(0), 0, 2)               # AL: gauges are prior data
+    self$y <- if (warm_start) self$y_prior else numeric(0)
+    self$t <- 0; self$history <- list(); self$best_y <- self$hyp$mean; self$best_x <- NULL
+    b <- self$belief(); self$ipv0 <- self$ipv <- mean(b$sd^2)
+    invisible(list(obs = b, info = self$info()))
+  },
+  f_true = function(x) {                                                                  # bilinear lookup on the grid
+    i <- pmin(pmax(round(x[1] * (G - 1)) + 1, 1), G); j <- pmin(pmax(round(x[2] * (G - 1)) + 1, 1), G)
+    surf(self$truth)[i, j] },
+  measure = function(x) self$f_true(x) + rnorm(1, 0, self$noise),                         # THE PHYSICAL EXPERIMENT
+  belief  = function() gp_post(self$X, self$y, self$grid, self$hyp),
+  step = function(action) {
+    x <- pmin(pmax(as.numeric(action), 0), 1); yv <- self$measure(x)
+    self$X <- rbind(self$X, x); self$y <- c(self$y, yv); self$t <- self$t + 1                # Bayesian belief update
+    b <- self$belief(); ipv_new <- mean(b$sd^2)
+    reward <- if (self$mode == "active_learning") (self$ipv - ipv_new) / self$ipv0 - self$cost
+              else max(0, yv - self$best_y) / self$hyp$sig - self$cost
+    self$ipv <- ipv_new
+    if (yv > self$best_y) { self$best_y <- yv; self$best_x <- x }
+    info <- c(self$info(), list(x_deg = round(to_degrees(matrix(x, 1)), 1), y = yv, reward = reward, sd_grid = b$sd, mu_grid = b$mu))
+    self$history[[self$t]] <- info
+    list(obs = b, reward = reward, terminated = self$t >= self$budget, info = info)
+  },
+  info = function() {
+    f_best <- if (is.null(self$best_x)) self$hyp$mean else self$f_true(self$best_x)
+    list(n_experiments = self$t, budget_left = self$budget - self$t, ipv_fraction = self$ipv / self$ipv0,
+         best_y = self$best_y, simple_regret = max(self$truth) - f_best) },
+  belief_summary = function(k = 3) {                                                      # compact JSON for an LLM
+    b <- self$belief(); top <- order(-b$sd)[1:k]; pk <- order(-b$mu)[1:k]; d <- to_degrees(self$grid)
+    list(mode = self$mode, n_experiments = self$t, budget_left = self$budget - self$t,
+         ipv_fraction_remaining = round(self$ipv / self$ipv0, 3),
+         uncertainty_hotspots = lapply(top, function(j) list(lon = round(d[j, 1], 1), lat = round(d[j, 2], 1), posterior_sd = round(b$sd[j], 2))),
+         predicted_peaks = lapply(pk, function(j) list(lon = round(d[j, 1], 1), lat = round(d[j, 2], 1), posterior_mean = round(b$mu[j], 2), posterior_sd = round(b$sd[j], 2))),
+         best_measured_mm_yr = round(self$best_y, 2),
+         best_measured_at_deg = if (is.null(self$best_x)) NULL else round(to_degrees(matrix(self$best_x, 1)), 1)) }
+))
+```
+
+```{r twin-3d}
+lab <- SeaLevelLab$new(hyp, grid, X_st, y_st, mode = "active_learning", budget = 15)
+lab$reset(seed = 1)
+plot_ly() |>
+  add_surface(x = unique(grid_deg[, 1]), y = unique(grid_deg[, 2]), z = t(surf(lab$truth)), colorscale = "Viridis", showscale = FALSE) |>
+  add_markers(data = rates, x = ~lon, y = ~lat, z = ~trend_mm_yr, text = ~Location, marker = list(color = "white", size = 5, line = list(color = "black", width = 1)), name = "gauges") |>
+  layout(title = "Digital twin: one hidden truth the agent must discover (mm/yr)",
+         scene = list(xaxis = list(title = "lon"), yaxis = list(title = "lat"), zaxis = list(title = "mm / yr")))
+```
+
+# Part 5 · Closing the loop: Bayesian optimisation drives the lab
+
+Each iteration: current belief → acquisition function over the grid → argmax → `lab$step()` → Bayes update. For active learning the acquisition is the **closed-form drop in integrated posterior variance** from adding one point $x$: $\;\Delta\mathrm{IPV}(x)=\frac{1}{|\mathcal G|}\sum_{g}\frac{\mathrm{Cov}_t(g,x)^2}{\sigma_t^2(x)+\sigma_n^2}$. For optimisation it is expected improvement.
+
+```{r acquisitions}
+###########################
+## 8. Acquisition functions (candidate set = the grid)
+###########################
+acq_ipv <- function(lab) {                       # a-optimal design gain, exact for a GP
+  p <- gp_post(lab$X, lab$y, lab$grid, lab$hyp, full = TRUE)
+  colMeans(p$cov^2) / (diag(p$cov) + lab$noise^2)
+}
+acq_ei <- function(lab) {                        # expected improvement over the best measured value
+  b <- lab$belief(); z <- (b$mu - lab$best_y) / b$sd
+  (b$mu - lab$best_y) * pnorm(z) + b$sd * dnorm(z)
+}
+run_policy <- function(lab, policy, seed) {      # policy: function(lab) -> action in [0,1]^2
+  lab$reset(seed = seed); out <- list()
+  repeat { s <- lab$step(policy(lab)); out[[length(out) + 1]] <- s$info; if (s$terminated) break }
+  out
+}
+policy_random <- function(lab) runif(2)
+init_design   <- rbind(c(.25, .5), c(.75, .25), c(.6, .8))        # cold start: 3 space-filling points before EI (Sobol in the Python version)
+policy_bo     <- function(lab) {
+  if (lab$mode == "optimization" && nrow(lab$X) < nrow(init_design)) return(init_design[nrow(lab$X) + 1, ])
+  lab$grid[which.max(if (lab$mode == "active_learning") acq_ipv(lab) else acq_ei(lab)), ]
+}
+```
+
+```{r bo-run}
+###########################
+## 9. Active learning: BO vs random, same hidden truths & noise for both
+###########################
+episodes <- 1:4
+curve <- bind_rows(lapply(episodes, function(s) bind_rows(
+  tibble(agent = "Random", episode = s, t = seq_along(h <- run_policy(lab, policy_random, s)), ipv = sapply(h, `[[`, "ipv_fraction")),
+  tibble(agent = "BO (IPV)", episode = s, t = seq_along(h <- run_policy(lab, policy_bo, s)),     ipv = sapply(h, `[[`, "ipv_fraction")))))
+ggplot(curve, aes(t, ipv, colour = agent, group = interaction(agent, episode))) + geom_line(alpha = .8) +
+  labs(x = "experiment", y = "fraction of prior map variance remaining", title = "Closed loop vs random, 4 hidden truths") +
+  scale_colour_manual(values = c("Random" = "grey50", "BO (IPV)" = "#0E7A8A"))
+curve |> filter(t == max(t)) |> group_by(agent) |> summarise(ipv_after_15 = mean(ipv), sd = sd(ipv)) |> knitr::kable(digits = 3)
+```
+
+```{r bo-animation}
+###########################
+## 10. Watch the belief update: posterior sd after each experiment (press play)
+###########################
+hist_bo <- run_policy(lab, policy_bo, seed = 1)
+frames <- bind_rows(lapply(seq_along(hist_bo), function(k) tibble(step = k, lon = grid_deg[, 1], lat = grid_deg[, 2], sd = hist_bo[[k]]$sd_grid)))
+pts <- bind_rows(lapply(seq_along(hist_bo), function(k) tibble(step = k, lon = hist_bo[[k]]$x_deg[1], lat = hist_bo[[k]]$x_deg[2], n = k)))
+pts_cum <- bind_rows(lapply(seq_along(hist_bo), function(k) mutate(pts[1:k, ], step = k)))
+p_anim <- ggplot(frames, aes(lon, lat)) + geom_raster(aes(fill = sd, frame = step)) + scale_fill_viridis_c(option = "magma", name = "sd") +
+  geom_point(data = stations, aes(lon, lat), shape = 24, fill = "white", size = 2) +
+  geom_point(data = pts_cum, aes(lon, lat, frame = step), colour = "red", size = 2.5) +
+  coord_fixed() + labs(title = "Posterior sd shrinks where the loop chooses to experiment")
+ggplotly(p_anim) |> animation_opts(frame = 600, transition = 0) |> animation_slider(currentvalue = list(prefix = "experiment "))
+```
+
+```{r bo-3d}
+###########################
+## 11. 3D: hidden truth vs. the belief after 15 chosen experiments
+###########################
+b_end <- lab$belief(); exp_pts <- to_degrees(lab$X[-(1:nrow(X_st)), , drop = FALSE])
+plot_ly() |>
+  add_surface(x = unique(grid_deg[, 1]), y = unique(grid_deg[, 2]), z = t(surf(lab$truth)), colorscale = "Greys", opacity = .45, showscale = FALSE, name = "truth") |>
+  add_surface(x = unique(grid_deg[, 1]), y = unique(grid_deg[, 2]), z = t(surf(b_end$mu)), surfacecolor = t(surf(b_end$sd)), colorscale = "Viridis", colorbar = list(title = "belief sd"), name = "belief") |>
+  add_markers(x = exp_pts[, 1], y = exp_pts[, 2], z = lab$y[-(1:nrow(X_st))], marker = list(color = "red", size = 5), name = "experiments") |>
+  layout(title = "Grey: hidden truth · Colour: belief mean after 15 experiments (colour = sd)",
+         scene = list(xaxis = list(title = "lon"), yaxis = list(title = "lat"), zaxis = list(title = "mm / yr")))
+```
+
+```{r opt-run}
+###########################
+## 12. Optimisation mode: find the hot-spot with a cold-start campaign
+###########################
+lab_opt <- SeaLevelLab$new(hyp, grid, X_st, y_st, mode = "optimization", budget = 15)
+bench <- bind_rows(lapply(1:4, function(s) bind_rows(
+  tibble(agent = "Random",  episode = s, regret = tail(run_policy(lab_opt, policy_random, s), 1)[[1]]$simple_regret),
+  tibble(agent = "BO (EI)", episode = s, regret = tail(run_policy(lab_opt, policy_bo, s), 1)[[1]]$simple_regret))))
+bench |> group_by(agent) |> summarise(mean_regret_mm_yr = mean(regret), sd = sd(regret)) |> knitr::kable(digits = 2, caption = "Simple regret vs the twin's true maximum (lower is better)")
+```
+
+# Part 6 · The reinforcement-learning view, and the industry stack from Python
+
+`run_policy()` above *is* an RL rollout: a policy maps the belief state to an action and collects the return. BO is a myopic planner (one-step acquisition); an RL policy trained across many hidden truths learns an **amortised** acquisition function. The deep-RL training lives in the Python folder `ai4s/` (Gymnasium environment `SeaLevelLab-v0`, BoTorch loop, Stable-Baselines3 PPO). Called from R through `reticulate`: same MDP, industry libraries.
+
+```{r py-check}
+reticulate_ok <- dir.exists("ai4s/.venv") && requireNamespace("reticulate", quietly = TRUE)
+if (reticulate_ok) { Sys.setenv(RETICULATE_PYTHON = "ai4s/.venv/bin/python"); library(reticulate) }
+reticulate_ok
+```
+
+```{r py-stack}
+#| eval: !expr reticulate_ok
+py_run_string("import warnings, sys; warnings.filterwarnings('ignore'); sys.path.insert(0, 'ai4s')")
+twin_py <- import_from_path("sea_level_twin", path = "ai4s")$DigitalTwin()
+env_py  <- import_from_path("sea_level_env",  path = "ai4s")$SeaLevelLabEnv(twin_py, mode = "active_learning", budget = 15L)
+bo_py   <- import_from_path("bo_agent",       path = "ai4s")
+rl_py   <- import_from_path("rl_agent",       path = "ai4s")
+cat("Gymnasium action space:", as.character(env_py$action_space), "| observation dim:", env_py$observation_space$shape[[1]], "\n")
+
+res_bo  <- bo_py$run_bo(env_py, 0L)                         # BoTorch: SingleTaskGP + qNegIntegratedPosteriorVariance
+res_rnd <- bo_py$run_random(env_py, 0L)
+ppo     <- rl_py$train_ppo(twin_py, "active_learning", budget = 15L, total_timesteps = 6000L)   # SB3 PPO (short, for the demo)
+res_ppo <- rl_py$run_ppo(ppo, env_py, 0L)
+bind_rows(lapply(list(res_rnd, res_bo, res_ppo), as_tibble)) |> select(agent, ipv_fraction, total_reward, best_y) |>
+  knitr::kable(digits = 3, caption = "Python stack on the same problem: Gymnasium env, BoTorch loop, SB3 PPO policy")
+```
+
+# Part 7 · The agentic layer: an LLM scientist calls the lab as tools
+
+The LLM never touches hardware. It sees compact statistics and can only call a few audited tools, each of which goes through `lab$step()`. Below: the tools, a scripted **ReAct** reasoner that runs offline, and the live version with `ellmer` (Claude) that runs when an API key is present.
+
+```{r tools}
+###########################
+## 13. Tools bound to the lab (JSON in, JSON out)
+###########################
+lab_agent <- SeaLevelLab$new(hyp, grid, X_st, y_st, mode = "active_learning", budget = 15); lab_agent$reset(seed = 3)
+tool_describe_lab <- function() toJSON(list(target = "sea-level rise rate (mm/yr)", domain = list(lon = LON, lat = LAT),
+  gp_hyper = lapply(hyp, round, 3), belief = lab_agent$belief_summary()), auto_unbox = TRUE)
+tool_run_bo_campaign <- function(mode, n_experiments) {
+  if (n_experiments > lab_agent$budget - lab_agent$t) return(toJSON(list(error = sprintf("only %d experiments left", lab_agent$budget - lab_agent$t)), auto_unbox = TRUE))
+  lab_agent$mode <- mode; before <- lab_agent$ipv / lab_agent$ipv0
+  runs <- lapply(seq_len(n_experiments), function(i) lab_agent$step(policy_bo(lab_agent))$info)
+  toJSON(list(ran = length(runs), mode = mode, ipv_fraction_before = round(before, 3), ipv_fraction_after = round(lab_agent$ipv / lab_agent$ipv0, 3),
+              experiments = lapply(runs, function(r) list(at_deg = r$x_deg, mm_yr = round(r$y, 2))), belief = lab_agent$belief_summary()), auto_unbox = TRUE)
+}
+tool_surrogate_hyperparameters <- function() toJSON(lapply(gp_fit(lab_agent$X, lab_agent$y), round, 3), auto_unbox = TRUE)
+tool_final_report <- function() toJSON(c(lab_agent$belief_summary(), list(experiments = lapply(lab_agent$history, function(r) list(at_deg = r$x_deg, mm_yr = round(r$y, 2))))), auto_unbox = TRUE)
+```
+
+```{r mock-agent}
+###########################
+## 14. Offline ReAct loop (Thought -> Action -> Observation), same decision rule the live prompt asks for
+###########################
+say <- function(kind, txt) cat(sprintf("%-12s%s\n", kind, txt))
+act <- function(name, ...) { say("Action:", sprintf("%s(%s)", name, paste(sprintf("%s=%s", names(list(...)), unlist(list(...))), collapse = ", ")))
+  out <- fromJSON(do.call(get(name), list(...))); say("Observation:", substr(toJSON(out[setdiff(names(out), c("belief", "experiments"))], auto_unbox = TRUE), 1, 160)); out }
+
+say("Goal:", "Characterise the rise-rate field with 15 experiments, then locate the highest-risk site.")
+say("Thought:", "I need the lab's state before spending budget.")
+lab_state <- act("tool_describe_lab"); belief <- lab_state$belief; gain <- 1; rounds <- 0
+while (belief$budget_left > 5 && gain > 0.012 && rounds < 3) {
+  hs <- belief$uncertainty_hotspots[1, ]
+  say("Thought:", sprintf("IPV is %.3f of the prior; least-known cell (%sE, %s) has sd %s. Spend 3 experiments on active learning.", belief$ipv_fraction_remaining, hs$lon, hs$lat, hs$posterior_sd))
+  r <- act("tool_run_bo_campaign", mode = "active_learning", n_experiments = 3)
+  gain <- (r$ipv_fraction_before - r$ipv_fraction_after) / r$ran; belief <- r$belief; rounds <- rounds + 1
+  say("Thought:", sprintf("IPV %.3f -> %.3f: %.1f%% of prior variance per experiment %s", r$ipv_fraction_before, r$ipv_fraction_after, 100 * gain, if (gain > 0.012) "-- still worth it." else "-- diminishing returns, stop characterising."))
+}
+pk <- belief$predicted_peaks[1, ]
+say("Thought:", sprintf("Belief predicts the highest rate near (%sE, %s): %s +/- %s mm/yr. Switch to hot-spot search with the remaining %d experiments.", pk$lon, pk$lat, pk$posterior_mean, pk$posterior_sd, belief$budget_left))
+r <- act("tool_run_bo_campaign", mode = "optimization", n_experiments = belief$budget_left)
+hp <- act("tool_surrogate_hyperparameters")
+say("Thought:", sprintf("Refit length-scale %.3f vs prior %.3f: %s", hp$ls, hyp$ls, if (hp$ls > 0.4 * hyp$ls) "basin-scale coherence confirmed." else "much shorter -> local effect, flag for follow-up."))
+rep <- act("tool_final_report")
+say("Answer:", sprintf("%d experiments; IPV reduced to %.3f of start; hot-spot %.2f mm/yr at (%s).", rep$n_experiments, rep$ipv_fraction_remaining, rep$best_measured_mm_yr, paste(rep$best_measured_at_deg, collapse = ", ")))
+```
+
+```{r live-agent}
+#| eval: !expr nzchar(Sys.getenv("ANTHROPIC_API_KEY")) && requireNamespace("ellmer", quietly = TRUE)
+###########################
+## 15. Live: Claude drives the lab through the same tools (ellmer)
+###########################
+library(ellmer)
+lab_agent$reset(seed = 4)
+chat <- chat_anthropic(model = "claude-opus-5", system_prompt = paste(
+  "You are the scientist-in-the-loop of a self-driving sea-level laboratory in the tropical Pacific.",
+  "Every experiment costs budget. Characterise uncertainty before exploiting. Explain each decision in one or two",
+  "sentences before calling a tool, quote the numbers the tools return, and finish with tool_final_report."))
+chat$register_tool(tool(tool_describe_lab, "Describe the lab: target, bounds, surrogate hyper-parameters, current belief and budget."))
+chat$register_tool(tool(tool_run_bo_campaign, "Run a closed-loop Bayesian-optimisation campaign of n experiments.",
+  arguments = list(mode = type_string("'active_learning' (reduce map uncertainty) or 'optimization' (find the hot-spot)"),
+                   n_experiments = type_integer("number of experiments, must not exceed the remaining budget"))))
+chat$register_tool(tool(tool_surrogate_hyperparameters, "Refit the GP surrogate on all data and report length-scale, signal sd, noise sd."))
+chat$register_tool(tool(tool_final_report, "Summarise the campaign: experiments, uncertainty removed, best site."))
+chat$chat("You have 15 experiments. Characterise the field, then find the highest-risk site, and write a two-sentence conclusion for a coastal-adaptation planner.")
+```
+
+# Part 8 · What changed, in one breath
+
+*Previously* this document fitted a Bayesian spatial model and drew posterior maps. *Now* the same Matérn field is a GP surrogate inside a closed loop: a digital twin generates hidden truths, a Gymnasium-style environment turns "where to measure next" into a belief-MDP, Bayesian optimisation removes roughly half again as much map uncertainty as random experimentation for the same budget, the industry Python stack (Gymnasium · BoTorch · SB3) runs the same problem, and an LLM agent plans, experiments, interprets and reports through audited tools. The statistician's contribution is visible in code: the priors that stop the surrogate from collapsing, the calibration check, and the stopping rule based on information gain per experiment.

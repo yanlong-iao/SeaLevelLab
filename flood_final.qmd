@@ -1,0 +1,332 @@
+---
+title: "flood"
+format: html
+editor: visual
+---
+
+```{r}
+# Save your current settings so you don't break other things later
+opt <- options() 
+
+# Force R to look for both binaries and source (prioritizing binaries)
+options(pkgType="both")
+install.packages("INLA", repos=c(getOption("repos"), INLA="https://inla.r-inla-download.org/R/stable"), dep=TRUE)
+```
+
+```{r}
+library(INLA)
+library(lattice)
+
+##############
+m = 100
+points = matrix(runif(m*2),m,2)
+mesh = inla.mesh.create.helper(
+  points=points,
+  cutoff=0.05,
+  offset=c(0.1,0.4),
+  max.edge=c(0.05,0.5) )
+
+## Plot the mesh and the data locations
+plot(mesh)
+points(points[,1],points[,2],pch=20,col="red")
+## dev.copy2pdf(file="fig1.pdf")
+
+##############
+spde=inla.spde2.matern(mesh,alpha=2)
+
+##############
+sigma0 = 1   ## Standard deviation
+range0 = 0.2 ## Spatial range
+## Convert into tau and kappa:
+kappa0 = sqrt(8)/range0
+tau0 = 1/(sqrt(4*pi)*kappa0*sigma0)
+## Construct spde object and set priors
+## that will be used by inla().
+spde=inla.spde2.matern(mesh,
+  B.tau=cbind(log(tau0),1,0),
+  B.kappa=cbind(log(kappa0),0,1),
+  theta.prior.mean=c(0,0),
+  theta.prior.prec=c(0.1,1))
+
+##############
+Q=inla.spde2.precision(
+    spde,theta=c(0,0))
+x=as.vector(inla.qsample(n=1,Q))
+proj =
+    inla.mesh.projector(mesh,
+                        xlim=c(0,1),
+                        ylim=c(0,1),
+                        dims=c(200,200))
+image(inla.mesh.project(
+        proj,field=x))
+
+##############
+A=inla.spde.make.A(
+  mesh,
+  loc=points,
+  index=rep(1:m,times=2),
+  repl=rep(1:2,each=m) )
+
+##############
+Q=inla.spde.precision(
+    spde,theta=c(0,0))
+x=as.vector(inla.qsample(n=2,Q))
+covariate = rnorm(m*2)
+y = 5 + covariate*2 +
+    as.vector(A %*% x) +
+    rnorm(m*2)*0.01
+
+##############
+## Plot the first field replicate
+cp = colorRampPalette(c("blue","cyan","yellow","red"))
+at = pretty(c(-1,1)*max(abs(x[1:mesh$n])),101)
+print(
+levelplot(row.values=proj$x,
+          column.values=proj$y,
+          x=inla.mesh.project(
+              proj,field=x[1:mesh$n]),
+          xlim=c(0,1),
+          ylim=c(0,1),
+          col.regions=cp, at=at,
+          aspect="iso",
+          contour=FALSE, labels=FALSE, pretty=TRUE,
+          xlab=NULL,ylab=NULL,scales=list(draw=FALSE))
+    )
+## dev.copy2pdf(file="fig2.pdf")
+
+##############
+mesh.index=inla.spde.make.index(
+  name="field",
+  n.mesh=mesh$n, n.repl=2)
+
+##############
+st.est=inla.stack(
+  data=list(y=y),
+  A=list(A,1),
+  effects=list(
+    c(mesh.index,list(intercept=1)),
+    list(covar=covariate)),
+  tag="est")
+
+##############
+st.pred=inla.stack(
+  data=list(y=NA),
+  A=list(1),
+  effects=list(
+    c(mesh.index,list(intercept=1))),
+  tag="pred")
+
+##############
+stack = inla.stack(st.est,st.pred)
+
+##############
+formula =
+  y ~ -1 + intercept + covar +
+      f(field, model=spde,
+        replicate=field.repl)
+inla.result =
+  inla(formula,
+    data=inla.stack.data(stack,spde=spde),
+    family="normal",
+    control.predictor=
+      list(A=inla.stack.A(stack),
+           compute=TRUE))
+
+##############
+result = inla.spde2.result(
+  inla.result, "field", spde)
+plot(result$marginals.range.nominal[[1]])
+
+##############
+index=inla.stack.index(
+  stack,"pred")$data
+image(inla.mesh.project(proj,
+  inla.result$summary.linear.predictor$mean[
+    index[mesh.index$field.repl==1]]))
+image(inla.mesh.project(proj,
+  inla.result$summary.linear.predictor$sd[
+    index[mesh.index$field.repl==1]]))
+
+##############
+## Posterior mean
+print(
+levelplot(row.values=proj$x,
+          column.values=proj$y,
+          x=inla.mesh.project(proj,
+          inla.result$summary.linear.predictor$mean[index[mesh.index$field.repl==1]]),
+          xlim=c(0,1),
+          ylim=c(0,1),
+          col.regions=cp, at=at+5,
+          aspect="iso",
+          contour=FALSE, labels=FALSE, pretty=TRUE,
+          xlab=NULL,ylab=NULL,scales=list(draw=FALSE))
+    )
+## dev.copy2pdf(file="fig3.pdf")
+
+## Posterior std.dev.
+print(
+levelplot(row.values=proj$x,
+          column.values=proj$y,
+          x=inla.mesh.project(proj,
+          inla.result$summary.linear.predictor$sd[index[mesh.index$field.repl==1]]),
+          xlim=c(0,1),
+          ylim=c(0,1),
+          col.regions=cp,
+          aspect="iso",
+          contour=FALSE, labels=FALSE, pretty=TRUE,
+          xlab=NULL,ylab=NULL,scales=list(draw=FALSE))
+    )
+## dev.copy2pdf(file="fig4.pdf")
+```
+
+```{r}
+install.packages("INLA", repos = c(getOption("repos"), INLA = "https://inla.r-inla-download.org/R/stable"), dep = TRUE)
+
+
+```
+
+```{r}
+###########################
+## 0. 加载必要 R 包
+###########################
+library(INLA)
+library(ggplot2)
+library(viridis)
+library(gridExtra)  # 用于拼图
+
+###########################
+## 1. 读取并清洗数据 + 采样
+###########################
+data <- read.csv("Processed_Final_data.csv")
+data <- data[!is.na(data$Mean) & !is.na(data$Std_Dev), ]
+
+set.seed(123)  
+n.sample <- 3000
+sub_index <- sample(1:nrow(data), n.sample)
+data_sub <- data[sub_index, ]
+
+points <- jitter(as.matrix(data_sub[, c("Longitude", "Latitude")]), amount = 1e-5)
+
+###########################
+## 2. 构建 Mesh + SPDE 模型
+###########################
+mesh <- inla.mesh.2d(
+  loc = points,
+  cutoff = 2.0,
+  max.edge = c(5.0, 6.0),
+  offset = c(1.0, 3.0)
+)
+
+spde <- inla.spde2.matern(mesh, alpha = 2)
+
+###########################
+## 3. 构建设计矩阵 + Stack
+###########################
+A <- inla.spde.make.A(mesh, loc = points)
+mesh.index <- inla.spde.make.index(name = "field", n.spde = mesh$n)
+
+stack <- inla.stack(
+  data = list(y = data_sub$Mean),
+  A = list(A, 1),
+  effects = list(
+    c(mesh.index, list(intercept = 1)),
+    list(covar = data_sub$Std_Dev)
+  ),
+  tag = "predictor"
+)
+
+###########################
+## 4. 拟合 INLA 模型
+###########################
+formula <- y ~ -1 + intercept + covar + f(field, model = spde)
+
+result <- inla(
+  formula,
+  data = inla.stack.data(stack, spde = spde),
+  family = "normal",
+  control.predictor = list(
+    A = inla.stack.A(stack),
+    compute = TRUE,
+    link = 1
+  ),
+  control.inla = list(strategy = "gaussian", int.strategy = "eb")
+)
+
+###########################
+## 5. 提取结果并绘图
+###########################
+index <- inla.stack.index(stack, tag = "predictor")$data
+
+df <- data.frame(
+  Longitude = data_sub$Longitude,
+  Latitude = data_sub$Latitude,
+  Mean = result$summary.fitted.values$mean[index],
+  SD = result$summary.fitted.values$sd[index]
+)
+
+# Posterior Mean 地图
+p1 <- ggplot(df, aes(x = Longitude, y = Latitude, color = Mean)) +
+  geom_point(size = 1.2) +
+  scale_color_viridis_c() +
+  labs(title = "Posterior Mean (Sampled Data)") +
+  coord_fixed()
+
+# Posterior Mean 分布图
+p_mean_dist <- ggplot(df, aes(x = Mean)) +
+  geom_histogram(aes(y = ..density..), bins = 40, fill = "skyblue", color = "white") +
+  geom_density(color = "darkblue", size = 1) +
+  labs(title = "Distribution of Posterior Mean", x = "Posterior Mean", y = "Density")
+
+# Posterior SD 分布图（可选）
+p_sd_dist <- ggplot(df, aes(x = SD)) +
+  geom_histogram(aes(y = ..density..), bins = 40, fill = "orange", color = "white") +
+  geom_density(color = "red", size = 1) +
+  labs(title = "Distribution of Posterior SD", x = "Posterior SD", y = "Density")
+
+###########################
+## 6. 显示图形
+###########################
+# 并排展示 Mean 地图 + 分布图
+grid.arrange(p1, p_mean_dist, ncol = 2)
+
+# 显示 SD 分布图
+print(p_sd_dist)
+
+```
+
+```{r}
+df$Observed_Mean <- data_sub$Mean
+df$Residual <- df$Mean - df$Observed_Mean
+
+
+ggplot(df, aes(x = Observed_Mean, y = Mean)) +
+  geom_point(alpha = 0.4, color = "steelblue") +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Posterior Mean vs Observed Mean",
+       x = "Observed Mean", y = "Posterior Mean") +
+  theme_minimal()
+
+
+ggplot(df, aes(x = Residual)) +
+  geom_histogram(bins = 40, fill = "darkorange", color = "white") +
+  geom_vline(xintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Distribution of Residuals (Posterior Mean - Observed)",
+       x = "Residual", y = "Count") +
+  theme_minimal()
+
+
+ggplot(df, aes(x = Longitude, y = Latitude, color = Residual)) +
+  geom_point(size = 1.5) +
+  scale_color_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  labs(title = "Spatial Distribution of Residuals") +
+  coord_fixed() +
+  theme_minimal()
+
+
+ggplot(df, aes(x = SD, y = abs(Residual))) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "loess", color = "red") +
+  labs(title = "Prediction Error vs Posterior SD",
+       x = "Posterior SD", y = "Absolute Residual")
+
+```
