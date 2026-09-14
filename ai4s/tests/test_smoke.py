@@ -63,3 +63,36 @@ def test_llm_toolbox_refuses_to_overspend(twin):
     assert "error" in json.loads(tb.call("run_bo_campaign", mode="optimization", n_experiments=99))
     assert json.loads(tb.call("run_bo_campaign", mode="active_learning", n_experiments=3))["ran"] == 3
     assert "error" in json.loads(tb.call("run_experiment", lon_deg=170.0, lat_deg=-5.0))
+
+
+def test_llm_agent_loop_executes_tool_calls_with_a_stub_client(twin):
+    """The live agent loop is exercised offline: a stub endpoint scripts two tool calls, then stops."""
+    import json
+    from types import SimpleNamespace as NS
+    from llm_agent import LabToolbox, LLMScientistAgent
+
+    env = SeaLevelLabEnv(twin, mode="active_learning", budget=4); env.reset(seed=0)
+    script = [
+        [NS(id="c1", function=NS(name="describe_lab", arguments="{}"))],
+        [NS(id="c2", function=NS(name="run_bo_campaign", arguments=json.dumps({"mode": "optimization", "n_experiments": 4}))),
+         NS(id="c3", function=NS(name="not_a_tool", arguments="{}"))],          # a bad call must not crash the loop
+        None,
+    ]
+    seen = []
+
+    class StubCompletions:
+        def create(self, model, messages, tools):
+            seen.append(messages)
+            calls = script.pop(0)
+            msg = NS(content="thinking..." if calls else "done", tool_calls=calls)
+            return NS(choices=[NS(message=msg)])
+
+    stub = NS(chat=NS(completions=StubCompletions()))
+    trace = LLMScientistAgent(LabToolbox(env), model="stub", client=stub).run("go")
+
+    assert env.t == 4                                                        # the campaign really ran
+    assert sum(1 for t in trace if t.startswith("Action:")) == 3
+    last = seen[-1]
+    tool_msgs = [m for m in last if m.get("role") == "tool"]
+    assert [m["tool_call_id"] for m in tool_msgs] == ["c1", "c2", "c3"]      # every call answered, in order
+    assert "error" in json.loads(tool_msgs[-1]["content"])                   # the bad call came back as data

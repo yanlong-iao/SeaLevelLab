@@ -6,8 +6,9 @@ lab code as *tools* (ReAct: Thought -> Action -> Observation -> ...).
 
 Two implementations share one toolbox:
   * `MockScientistAgent`   -- deterministic ReAct loop, no API key, used in tests/CI and the demo.
-  * `ClaudeScientistAgent` -- the real thing: Anthropic SDK tool runner (`@beta_tool`), Claude does
-                              the reasoning; each tool call executes a computational/physical experiment.
+  * `LLMScientistAgent`    -- the real thing: any OpenAI-compatible chat endpoint (OpenAI, Azure, or a
+                              local vLLM / Ollama server) does the reasoning; each tool call executes a
+                              computational or physical experiment through the same toolbox.
 
 Design rules that matter in a real lab  [HKQAI JD: AI agents that coordinate experiments]
   1. Tools return *compact JSON summaries*, never raw arrays -- the LLM reasons over statistics
@@ -34,8 +35,8 @@ _PY2JSON = {int: "integer", float: "number", str: "string", bool: "boolean"}
 
 # --------------------------------------------------------------------------- @tool (LangChain-style)
 def tool(fn: Callable) -> Callable:
-    """Minimal `@tool`: derives the JSON schema Anthropic / LangChain / OpenAI all expect from the
-    signature + docstring.  Same shape as `anthropic.beta_tool`, so the toolbox is provider-agnostic."""
+    """Minimal `@tool`: derives the JSON schema that LangChain, OpenAI function-calling and every
+    other framework expect from the signature + docstring, so the toolbox is provider-agnostic."""
     sig = inspect.signature(fn, eval_str=True)          # eval_str: resolve `from __future__ import annotations`
     props, required = {}, []
     for name, p in sig.parameters.items():
@@ -131,7 +132,7 @@ class LabToolbox:
 # --------------------------------------------------------------------------- Mock ReAct agent
 class MockScientistAgent:
     """A scripted stand-in for the LLM so the agentic loop is testable offline.  The *reasoning*
-    is a faithful sketch of what the real prompt asks Claude to do: characterise first (reduce
+    is a faithful sketch of what the real prompt asks the LLM to do: characterise first (reduce
     uncertainty), exploit second (find the hot-spot), then report -- re-planning on tool errors."""
 
     def __init__(self, toolbox: LabToolbox, min_gain_per_experiment: float = 0.012, reserve: int = 5):
@@ -194,7 +195,7 @@ class MockScientistAgent:
         return self.trace
 
 
-# --------------------------------------------------------------------------- Live Claude agent (optional)
+# --------------------------------------------------------------------------- Live LLM agent (optional)
 SYSTEM_PROMPT = """You are the scientist-in-the-loop of a self-driving sea-level laboratory in the tropical Pacific.
 The lab measures the sea-level-rise rate (mm/yr) at any location, but every experiment costs budget.
 Work in a plan -> experiment -> interpret loop using the tools. Characterise uncertainty before exploiting.
@@ -202,30 +203,47 @@ Explain each decision in one or two sentences before calling a tool, quote the n
 and finish with final_report and a short written conclusion for a coastal-adaptation planner."""
 
 
-class ClaudeScientistAgent:
-    """Anthropic SDK tool runner around the same toolbox.  Requires credentials
-    (ANTHROPIC_API_KEY or `ant auth login`).  Model: claude-opus-5 with server-side fallbacks."""
+class LLMScientistAgent:
+    """ReAct loop over any OpenAI-compatible chat-completions endpoint with function calling.
 
-    def __init__(self, toolbox: LabToolbox, model: str = "claude-opus-5"):
-        import anthropic
-        from anthropic import beta_tool
-        self.client = anthropic.Anthropic()
-        self.model = model
-        self.tools = [beta_tool(f) for f in toolbox.functions]      # schema generated from signature + docstring
+    Works unchanged against OpenAI (`OPENAI_API_KEY`), Azure OpenAI, or a self-hosted model served by
+    vLLM / Ollama (`OPENAI_BASE_URL=http://localhost:11434/v1`).  The loop is the manual agentic loop:
+    send messages + tool schemas -> execute every tool call the model makes -> append results -> repeat
+    until the model stops calling tools.  `client` is injectable so the loop is unit-tested with a stub.
+    [HKQAI JD: AI agents that coordinate physical and computational experiments]
+    """
+
+    def __init__(self, toolbox: LabToolbox, model: str = "gpt-4o", client=None, max_turns: int = 20):
+        if client is None:
+            from openai import OpenAI          # reads OPENAI_API_KEY / OPENAI_BASE_URL from the environment
+            client = OpenAI()
+        self.tb, self.model, self.client, self.max_turns = toolbox, model, client, max_turns
+        self.tools = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
+                                                         "parameters": t["input_schema"]}} for t in toolbox.specs]
 
     def run(self, goal: str) -> list[str]:
-        trace = []
-        runner = self.client.beta.messages.tool_runner(
-            model=self.model, max_tokens=16000, system=SYSTEM_PROMPT, tools=self.tools,
-            messages=[{"role": "user", "content": goal}],
-            betas=["server-side-fallback-2026-07-01"], fallbacks="default",
-        )
-        for message in runner:                                       # SDK executes tools and loops until end_turn
-            for block in message.content:
-                if block.type == "text":
-                    trace.append(f"Claude:      {block.text}"); print(trace[-1])
-                elif block.type == "tool_use":
-                    trace.append(f"Action:      {block.name}({json.dumps(block.input)})"); print(trace[-1])
+        trace: list[str] = []
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": goal}]
+        for _ in range(self.max_turns):
+            resp = self.client.chat.completions.create(model=self.model, messages=messages, tools=self.tools)
+            msg = resp.choices[0].message
+            if msg.content:
+                trace.append(f"LLM:         {msg.content}"); print(trace[-1])
+            if not msg.tool_calls:
+                break                                                     # the model is done -> end of episode
+            messages.append({"role": "assistant", "content": msg.content or "",
+                             "tool_calls": [{"id": c.id, "type": "function",
+                                             "function": {"name": c.function.name, "arguments": c.function.arguments}}
+                                            for c in msg.tool_calls]})
+            for call in msg.tool_calls:                                   # execute EVERY call, return EVERY result
+                args = json.loads(call.function.arguments or "{}")        # always parse, never string-match
+                trace.append(f"Action:      {call.function.name}({json.dumps(args)})"); print(trace[-1])
+                try:
+                    result = self.tb.call(call.function.name, **args)
+                except Exception as exc:                                  # a failed tool is data for re-planning, not a crash
+                    result = json.dumps({"error": f"{type(exc).__name__}: {exc}"})
+                trace.append(f"Observation: {result[:300]}"); print(trace[-1])
+                messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
         return trace
 
 

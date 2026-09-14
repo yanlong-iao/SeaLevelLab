@@ -10,7 +10,7 @@ stack an AI4S team uses to run a self-driving laboratory:
 | Environment | `sea_level_env.py` | **Gymnasium** (`SeaLevelLab-v0`) | Belief-MDP: state = GP posterior grid + budget, action = next location, reward = variance reduction *or* improvement |
 | Closed loop | `bo_agent.py` | **BoTorch** (primary) + **Optuna** | Refit surrogate → acquisition (`qNegIntegratedPosteriorVariance` / `qLogNoisyExpectedImprovement`) → `env.step` |
 | Learned policy | `rl_agent.py` | **Stable-Baselines3** PPO | Amortised experimental-design policy trained across many hidden truths |
-| Agentic layer | `llm_agent.py` | `@tool` toolbox + Anthropic SDK tool runner | LLM scientist reasons (ReAct) and calls the lab as tools; offline mock + live Claude |
+| Agentic layer | `llm_agent.py` | `@tool` toolbox + OpenAI-compatible function calling | LLM scientist reasons (ReAct) and calls the lab as tools; offline mock + live agent (OpenAI, Azure, vLLM, Ollama) |
 | Demo | `run_demo.py` | — | Random vs BoTorch vs Optuna vs PPO benchmark, belief map figure, agent transcript |
 
 > **Live demo in RStudio:** open `../flood_ai4s.qmd` and press *Render*. It re-implements this stack in R (Matérn GP from scratch, R6 Gymnasium-style env, closed-form acquisitions, `ellmer` agent) with 3D plotly surfaces, and calls this Python folder from one `reticulate` chunk.
@@ -21,7 +21,7 @@ stack an AI4S team uses to run a self-driving laboratory:
 cd ai4s
 source .venv/bin/activate          # created with: python3 -m venv .venv && pip install -r requirements.txt
 python run_demo.py                 # ~3 min on a laptop (PPO training dominates); --skip-rl for ~30 s
-python run_demo.py --live          # also lets Claude drive the lab (needs ANTHROPIC_API_KEY or `ant auth login`)
+python run_demo.py --live          # also lets an LLM drive the lab (OPENAI_API_KEY, or OPENAI_BASE_URL for a local model)
 ```
 
 Outputs in `outputs/`: `results.json` (benchmark), `belief_map.png` (truth / posterior mean / posterior sd with

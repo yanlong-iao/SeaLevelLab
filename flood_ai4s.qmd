@@ -400,7 +400,7 @@ bind_rows(lapply(list(res_rnd, res_bo, res_ppo), as_tibble)) |> select(agent, ip
 
 # Part 7 · The agentic layer: an LLM scientist calls the lab as tools
 
-The LLM never touches hardware. It sees compact statistics and can only call a few audited tools, each of which goes through `lab$step()`. Below: the tools, a scripted **ReAct** reasoner that runs offline, and the live version with `ellmer` (Claude) that runs when an API key is present.
+The LLM never touches hardware. It sees compact statistics and can only call a few audited tools, each of which goes through `lab$step()`. Below: the tools, a scripted **ReAct** reasoner that runs offline, and the live version with `ellmer`, which talks to any OpenAI-compatible endpoint (OpenAI, Azure, or a local vLLM / Ollama model) and runs when an API key is present.
 
 ```{r tools}
 ###########################
@@ -448,13 +448,13 @@ say("Answer:", sprintf("%d experiments; IPV reduced to %.3f of start; hot-spot %
 ```
 
 ```{r live-agent}
-#| eval: !expr nzchar(Sys.getenv("ANTHROPIC_API_KEY")) && requireNamespace("ellmer", quietly = TRUE)
+#| eval: !expr nzchar(Sys.getenv("OPENAI_API_KEY")) && requireNamespace("ellmer", quietly = TRUE)
 ###########################
-## 15. Live: Claude drives the lab through the same tools (ellmer)
+## 15. Live: an LLM drives the lab through the same tools (ellmer, OpenAI-compatible API)
 ###########################
 library(ellmer)
 lab_agent$reset(seed = 4)
-chat <- chat_anthropic(model = "claude-opus-5", system_prompt = paste(
+chat <- chat_openai(model = "gpt-4o", system_prompt = paste(          # base_url = "http://localhost:11434/v1" for a local model
   "You are the scientist-in-the-loop of a self-driving sea-level laboratory in the tropical Pacific.",
   "Every experiment costs budget. Characterise uncertainty before exploiting. Explain each decision in one or two",
   "sentences before calling a tool, quote the numbers the tools return, and finish with tool_final_report."))

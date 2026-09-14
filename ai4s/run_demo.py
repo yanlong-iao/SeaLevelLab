@@ -2,7 +2,7 @@
 run_demo.py -- end-to-end demonstration of the AI4S stack built on flood_final.qmd's model.
 
     python run_demo.py                 # twin -> Gym env -> Random / BoTorch / Optuna / PPO -> LLM agent
-    python run_demo.py --live          # additionally lets Claude drive the lab (needs API credentials)
+    python run_demo.py --live          # additionally lets an LLM drive the lab (needs OPENAI_API_KEY, or OPENAI_BASE_URL for a local model)
 
 Outputs land in ./outputs: results.json, belief_map.png, agent_transcript.txt
 """
@@ -63,7 +63,8 @@ def main():
     ap.add_argument("--episodes", type=int, default=5)
     ap.add_argument("--rl-steps", type=int, default=40_000)
     ap.add_argument("--skip-rl", action="store_true")
-    ap.add_argument("--live", action="store_true", help="let Claude drive the lab via the Anthropic SDK")
+    ap.add_argument("--live", action="store_true", help="let an LLM drive the lab via any OpenAI-compatible endpoint")
+    ap.add_argument("--model", default="gpt-4o", help="model name for --live (any model your endpoint serves)")
     a = ap.parse_args()
 
     t0 = time.time()
@@ -94,10 +95,10 @@ def main():
     (OUT / "agent_transcript.txt").write_text("\n".join(trace))
 
     if a.live:
-        from llm_agent import ClaudeScientistAgent
-        print("\n=== LLM agent (Claude, live) driving the lab ===")
+        from llm_agent import LLMScientistAgent
+        print(f"\n=== LLM agent ({a.model}, live) driving the lab ===")
         env = SeaLevelLabEnv(twin, mode="active_learning", budget=a.budget); env.reset(seed=2)
-        ClaudeScientistAgent(LabToolbox(env)).run(f"You have {a.budget} experiments. Characterise the field, then find the highest-risk site.")
+        LLMScientistAgent(LabToolbox(env), model=a.model).run(f"You have {a.budget} experiments. Characterise the field, then find the highest-risk site.")
 
     (OUT / "results.json").write_text(json.dumps(results, indent=1))
     print(f"\nsaved {OUT/'results.json'}   ({time.time()-t0:.0f}s total)")

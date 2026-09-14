@@ -5,4 +5,4 @@ optuna>=3.6
 pandas
 scipy
 matplotlib
-anthropic>=1.0   # only for the optional live Claude agent (llm_agent.py --live)
+openai>=1.0      # only for the optional live agent (run_demo.py --live); any OpenAI-compatible endpoint works

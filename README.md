@@ -18,7 +18,7 @@ at 13 Pacific stations (1992–2025) and turns it into the decision layer an aut
 | **Environment** | `SeaLevelLab-v0`: a belief-MDP where the state is the GP posterior, the action is *where to experiment next*, the reward is information gain or improvement | **Gymnasium** |
 | **Closed loop** | Refit surrogate → acquisition (integrated posterior variance / noisy EI) → experiment → Bayes update | **BoTorch** · Optuna |
 | **Learned policy** | Amortised experimental-design policy trained across many hidden truths | **Stable-Baselines3** PPO |
-| **Agentic layer** | An LLM scientist reasons over compact statistics and calls the lab through audited tools (ReAct); offline mock + live Claude | Anthropic SDK tool runner · `ellmer` |
+| **Agentic layer** | An LLM scientist reasons over compact statistics and calls the lab through audited tools (ReAct); offline mock + live agent against any OpenAI-compatible endpoint | OpenAI function calling · `ellmer` |
 | **Live demo** | Everything re-implemented in R with interactive 3D surfaces and an animated belief map, rendered in RStudio | R-INLA · plotly · R6 |
 
 <p align="center"><img src="docs/belief_map.png" alt="Hidden truth, belief posterior mean and posterior sd after 15 chosen experiments" width="900"></p>
@@ -94,8 +94,8 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python sea_level_env.py        # Gymnasium check_env + a random rollout
 python run_demo.py             # Random vs BoTorch vs Optuna vs PPO benchmark, figure, agent transcript  (~3 min)
-python run_demo.py --live      # let Claude drive the lab (needs ANTHROPIC_API_KEY)
-pytest tests                   # 7 smoke tests, also run in CI
+python run_demo.py --live      # let an LLM drive the lab (OPENAI_API_KEY, or OPENAI_BASE_URL for vLLM / Ollama)
+pytest tests                   # 8 smoke tests, also run in CI
 ```
 
 **RStudio live demo** — open [`flood_ai4s.qmd`](flood_ai4s.qmd) and press *Render* (INLA, plotly, R6, reticulate, ellmer).
@@ -113,7 +113,7 @@ The rendered result is served at **https://yanlong-iao.github.io/SeaLevelLab/** 
 │   ├── sea_level_env.py     SeaLevelLab-v0 (Gymnasium): belief-MDP, two reward modes, render, discrete wrapper
 │   ├── bo_agent.py          BoTorch loop (qNegIntegratedPosteriorVariance / qLogNoisyEI) + Optuna + random baseline
 │   ├── rl_agent.py          Stable-Baselines3 PPO on the same environment
-│   ├── llm_agent.py         @tool toolbox, mock ReAct agent, live Claude agent (Anthropic tool runner)
+│   ├── llm_agent.py         @tool toolbox, mock ReAct agent, live agent (OpenAI-compatible function calling)
 │   ├── run_demo.py          benchmark + figure + transcript
 │   ├── tests/               smoke tests (Gymnasium contract, every agent closes the loop, tool guards)
 │   └── outputs/             results.json, belief_map.png, agent_transcript.txt
