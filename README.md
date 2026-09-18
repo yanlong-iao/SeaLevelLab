@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Live demo](https://img.shields.io/badge/demo-GitHub%20Pages-0E7A8A.svg)](https://yanlong-iao.github.io/SeaLevelLab/)
 
-**Interactive query app:** [docs/app.html](https://yanlong-iao.github.io/SeaLevelLab/app.html) — a 3D surface of P(annual maximum sea level exceeds this station's own 1-in-N baseline level) for any year 2000–2100 and baseline return period, with 90 % credible intervals, data-support shading and the next best measurement site. Non-stationary GEV on de-trended annual maxima; one self-contained page, no network requests.
+**Interactive query app:** [docs/app.html](https://yanlong-iao.github.io/SeaLevelLab/app.html) — a pan-and-zoom map of the tropical Pacific with the exceedance-probability field, P(annual maximum sea level exceeds this station's own 1-in-N baseline level), painted over it for any year 2000–2100 and baseline return period. Click any location and a panel slides in with the probability, its 90 % credible interval, a local 3D surface (±6° × ±5°), data support and the nearest gauge; click a gauge for its annual maxima and fitted GEV return-level curve. Non-stationary GEV on de-trended annual maxima; R computes, the page is static (only the basemap tiles are fetched).
 
 A tide-gauge network *is* a laboratory whose experiments are expensive: deploying a gauge or running a
 survey campaign at a location. This project takes a classical R-INLA / SPDE spatial model of monthly sea level
@@ -110,7 +110,8 @@ The rendered result is served at **https://yanlong-iao.github.io/SeaLevelLab/** 
 ├── flood_final.qmd          original R-INLA SPDE analysis (the "before")
 ├── flood_ai4s.qmd           RStudio demo: INLA → GP → twin → Gym-style env → BO loop → LLM agent, 3D plotly
 ├── R/gp_core.R              shared Matérn GP core (k_matern, gp_post, gp_post_diag, gp_fit) used by the qmd and the app
-├── app/build_app.R          builds the query app: joint GEV MLE (shared xi), GP fields for trend and log-scale, IPV site, self-checks
+├── app/build_app.R          joint GEV MLE (shared xi), GP fields for trend and log-scale, IPV site, self-checks → docs/app_data.js + docs/vendor/
+├── app/test_app_math.js     node gate for the browser-side formulas (baseline check, monotonicity, band order, raster y-flip)
 ├── Processed_Final_data.csv 13 Pacific tide gauges, monthly, 1992–2025
 ├── ai4s/
 │   ├── sea_level_twin.py    data → rise rates → Matérn GP (MAP-II) → hidden-truth sampler → measure()
@@ -121,7 +122,7 @@ The rendered result is served at **https://yanlong-iao.github.io/SeaLevelLab/** 
 │   ├── run_demo.py          benchmark + figure + transcript
 │   ├── tests/               smoke tests (Gymnasium contract, every agent closes the loop, tool guards)
 │   └── outputs/             results.json, belief_map.png, agent_transcript.txt
-└── docs/                    GitHub Pages: rendered demo (index.html), engineering report (report.html), query app (app.html)
+└── docs/                    GitHub Pages: rendered demo (index.html), report (report.html), query app (app.html + app_math.js + app_data.js + vendor/)
 ```
 
 ## Data

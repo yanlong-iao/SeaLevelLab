@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# app/build_app.R -- builds docs/app.html, an interactive 3D query app for
+# app/build_app.R -- computes the data behind docs/app.html, an interactive query app for
 #
 #     P( annual maximum sea level exceeds this station's own 1-in-N baseline level )
 #
@@ -11,15 +11,14 @@
 # log sigma(x) carried across space by the Matern GP shared with flood_ai4s.qmd (R/gp_core.R).
 # Everything is computed here from Processed_Final_data.csv; the qmd is NOT re-rendered.
 #
-# Output: one self-contained page (plotly.js embedded by the R package, zero network requests).
+# Architecture: R only computes. Sections 1-9 fit the model and check it; section 10 writes
+#   docs/app_data.js   one assignment  window.APP_DATA = {...}  (a <script>, so file:// works without fetch/CORS)
+#   docs/vendor/       leaflet.js, leaflet.css, plotly.min.js copied from the installed R packages
+# The page itself (docs/app.html) and the formulas (docs/app_math.js) are hand-written and committed.
 #
-#     Rscript app/build_app.R
+#     Rscript app/build_app.R && node app/test_app_math.js
 
-suppressPackageStartupMessages({ library(dplyr); library(plotly); library(htmlwidgets); library(jsonlite) })
-if (!nzchar(Sys.getenv("RSTUDIO_PANDOC")) && !rmarkdown::pandoc_available()) {   # selfcontained = TRUE needs pandoc
-  cand <- Sys.glob("/Applications/RStudio.app/Contents/Resources/app/quarto/bin/tools/*/pandoc")
-  if (length(cand)) Sys.setenv(RSTUDIO_PANDOC = dirname(cand[1]))
-}
+suppressPackageStartupMessages({ library(dplyr); library(jsonlite) })
 setwd(normalizePath(file.path(dirname(sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE)[1])), "..")))
 source("R/gp_core.R")
 set.seed(2026)
@@ -176,157 +175,79 @@ if (gev$convergence != 0 || !(xi > -0.4 && xi < 0.4)) stop("check 5: GEV not con
 cat("\nself-checks 1-5: all passed\n")
 
 # ======================================================================================
-# 10. The page: one plotly surface (height = P, colour = support) + gauges + next-measurement marker,
-#     all interaction injected as JS through htmlwidgets::onRender. Zero network requests.
+# 10. Data export for the hand-written page + vendor assets + build-time assertions
 # ======================================================================================
 sig4 <- function(v) signif(v, 4)
-b0 <- p_band(Y0, N0)
-z0 <- matrix(sig4(b0$med), nrow = NY, ncol = NX, byrow = TRUE)          # rows = lat, cols = lon (plotly convention)
-c0 <- matrix(sig4(support), nrow = NY, ncol = NX, byrow = TRUE)
-support_scale <- list(c(0, "#ececec"), c(0.2499, "#ececec"), c(0.25, "#bfe3ea"), c(0.6, "#2b9db0"), c(1, "#083a4d"))  # < 0.25 fades to grey
 
-payload <- toJSON(list(
-  nx = NX, ny = NY, lon = sig4(g_lon), lat = sig4(g_lat), xi = sig4(xi), sig_beta = sig4(hyp_beta$sig),
+## 10a. vendor: leaflet.js / leaflet.css / plotly.min.js  (installed R packages -> install -> cdnjs)
+dir.create("docs/vendor", showWarnings = FALSE, recursive = TRUE)
+vendor_from_packages <- function() {
+  found <- list()
+  for (pkg in c("leaflet", "plotly")) {
+    if (!requireNamespace(pkg, quietly = TRUE)) next
+    lib <- system.file("htmlwidgets/lib", package = pkg)
+    files <- list.files(lib, recursive = TRUE, full.names = TRUE, pattern = "leaflet\\.(js|css)$|^plotly.*\\.min\\.js$")
+    files <- files[basename(files) %in% c("leaflet.js", "leaflet.css") | grepl("^plotly.*\\.min\\.js$", basename(files))]
+    for (f in files) found[[if (grepl("^plotly", basename(f))) "plotly.min.js" else basename(f)]] <- f
+    if (pkg == "leaflet") { img <- file.path(lib, "leaflet", "images"); if (dir.exists(img)) found[["images"]] <- img }
+  }
+  found
+}
+vendor_targets <- c("leaflet.js", "leaflet.css", "plotly.min.js")
+vf <- vendor_from_packages()
+if (!all(vendor_targets %in% names(vf))) {
+  install.packages(c("leaflet", "plotly"), repos = "https://cloud.r-project.org", quiet = TRUE)
+  vf <- vendor_from_packages()
+}
+vendor_source <- "installed R packages"
+if (all(vendor_targets %in% names(vf))) {
+  for (t in vendor_targets) file.copy(vf[[t]], file.path("docs/vendor", t), overwrite = TRUE)
+  if (!is.null(vf$images)) { dir.create("docs/vendor/images", showWarnings = FALSE); invisible(file.copy(list.files(vf$images, full.names = TRUE), "docs/vendor/images", overwrite = TRUE)) }
+} else {
+  vendor_source <- "cdnjs download"
+  cdn <- c("leaflet.js" = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js",
+           "leaflet.css" = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css",
+           "plotly.min.js" = "https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js")
+  for (t in vendor_targets) if (download.file(cdn[[t]], file.path("docs/vendor", t), quiet = TRUE, mode = "wb") != 0) stop("vendor: could not obtain ", t)
+}
+cat(sprintf("vendor: %s -> %s\n", vendor_source, paste(sprintf("%s (%.0f KB)", vendor_targets, file.size(file.path("docs/vendor", vendor_targets)) / 1e3), collapse = ", ")))
+
+## 10b. coastline for the offline fallback layer (longitudes stay 0-360)
+coastline <- tryCatch({
+  db <- if (requireNamespace("mapdata", quietly = TRUE)) { suppressPackageStartupMessages(library(mapdata)); "world2Hires" } else "world2"
+  m  <- maps::map(db, xlim = c(LON[1], LON[2]), ylim = c(LAT[1], LAT[2]), plot = FALSE)
+  xs <- sig4(m$x); ys <- sig4(m$y)
+  segs <- split(seq_along(xs), cumsum(is.na(xs)))
+  out <- lapply(segs, function(idx) { idx <- idx[!is.na(xs[idx])]; if (length(idx) < 2) return(NULL)
+    pts <- cbind(xs[idx], ys[idx]); keep <- c(TRUE, rowSums(abs(diff(pts))) > 0); pts[keep, , drop = FALSE] })
+  out <- Filter(function(z) !is.null(z) && nrow(z) >= 2, out)
+  cat(sprintf("coastline: %s, %d segments, %d points\n", db, length(out), sum(sapply(out, nrow))))
+  unname(out)
+}, error = function(e) { cat("WARNING: coastline unavailable (", conditionMessage(e), ") -- exporting an empty array; the offline basemap layer will be empty\n"); list() })
+
+## 10c. window.APP_DATA
+amax_series <- lapply(rates$Location, function(l) { a <- annual[annual$Location == l, ]; unname(cbind(a$Year, sig4(a$amax))) })
+app_data <- list(
+  # field arrays are flattened with LONGITUDE VARYING FASTEST: index k = i_lat * 160 + j_lon
+  # (lat[0] = -25 is the southernmost row; the page flips this when it paints the raster).
+  lon = sig4(g_lon), lat = sig4(g_lat), nx = NX, ny = NY,
   mu_beta = sig4(f_beta$mu), sd_beta = sig4(f_beta$sd), mu_ls = sig4(f_ls$mu), sd_ls = sig4(f_ls$sd), support = sig4(support),
-  stations = stations |> transmute(name = Location, lon = sig4(lon), lat = sig4(lat), beta = sig4(trend_mm_yr), sigma = sig4(sigma_m)),
-  next_pt = list(idx = next_idx - 1L, lon = sig4(grid_deg[next_idx, 1]), lat = sig4(grid_deg[next_idx, 2])),
-  init = list(Y = Y0, N = N0)
-), digits = I(4), auto_unbox = TRUE)
+  xi = sig4(xi), sig_beta = sig4(hyp_beta$sig),
+  stations = lapply(seq_len(S), function(s) list(
+    Location = rates$Location[s], lon360 = sig4(rates$lon[s]), lat = sig4(rates$lat[s]),
+    beta = sig4(rates$trend_mm_yr[s]), sigma = sig4(sigma_s[s]), mu0 = sig4(mu0_s[s]), amax = amax_series[[s]])),
+  next_site = list(lon360 = sig4(grid_deg[next_idx, 1]), lat = sig4(grid_deg[next_idx, 2])),
+  coastline = coastline,
+  built = format(Sys.time(), "%Y-%m-%d")
+)
+json <- toJSON(app_data, digits = I(4), auto_unbox = TRUE, null = "null")
+writeLines(paste0("/* generated by app/build_app.R -- do not edit. Field arrays are flattened lon-fastest: k = i_lat*160 + j_lon; lat[0] is the SOUTH edge. */\n",
+                  "window.APP_DATA = ", json, ";"), "docs/app_data.js")
+if (!file.exists("docs/app_data.js") || file.size("docs/app_data.js") < 1e5) stop("docs/app_data.js was not written")
+cat(sprintf("wrote docs/app_data.js (%.2f MB)\n", file.size("docs/app_data.js") / 1e6))
 
-js <- sprintf('function(el, x) {
-  var D = %s;
-  var NX = D.nx, NY = D.ny, XI = D.xi;
-
-  /* ---- the same closed form as p_exceed() in app/build_app.R ---- */
-  function pEx(beta, sigma, Y, N) {
-    var zN = (Math.pow(-Math.log(1 - 1 / N), -XI) - 1) / XI;
-    var delta = (beta / 1000) * (Y - 2000) / sigma;
-    var s = Math.max(0, 1 + XI * (zN - delta));
-    return 1 - Math.exp(-Math.pow(s, -1 / XI));
-  }
-  function fieldP(Y, N, which) {           /* which: 0 = median, -1 = lower 5%%, +1 = upper 95%% */
-    var z = new Array(NY);
-    for (var i = 0; i < NY; i++) {
-      var row = new Array(NX);
-      for (var j = 0; j < NX; j++) {
-        var k = i * NX + j;
-        var b = D.mu_beta[k] + which * 1.645 * D.sd_beta[k];
-        var s = Math.exp(D.mu_ls[k] - which * 1.645 * D.sd_ls[k]);
-        row[j] = pEx(b, s, Y, N);
-      }
-      z[i] = row;
-    }
-    return z;
-  }
-  function stationP(Y, N) { return D.stations.map(function(s) { return pEx(s.beta, s.sigma, Y, N); }); }
-  function nextP(Y, N) { var k = D.next_pt.idx; return [pEx(D.mu_beta[k], Math.exp(D.mu_ls[k]), Y, N)]; }
-
-  /* ---- layout: control bar on top, plot left, query panel right ---- */
-  var css = document.createElement("style");
-  css.textContent = "html,body{margin:0;height:100%%;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1b2a33;background:#f7f9fa}" +
-    "#sl-wrap{display:flex;flex-direction:column;height:100vh}" +
-    "#sl-bar{display:flex;flex-wrap:wrap;gap:18px;align-items:center;padding:10px 16px;border-bottom:1px solid #d5dde3;background:#fff}" +
-    "#sl-bar h1{font-size:15px;font-weight:600;margin:0 16px 0 0}" +
-    "#sl-bar label{font-size:13px;display:flex;align-items:center;gap:8px}" +
-    "#sl-bar input[type=range]{width:260px}" +
-    "#sl-main{display:flex;flex:1;min-height:0}" +
-    "#sl-plot{flex:1;min-width:0}" +
-    "#sl-panel{width:330px;flex:none;border-left:1px solid #d5dde3;background:#fff;display:flex;flex-direction:column}" +
-    "#sl-panel .body{padding:14px 16px;overflow:auto;flex:1;font-size:13.5px;line-height:1.5}" +
-    "#sl-panel h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#5a6b78;margin:0 0 10px}" +
-    "#sl-panel dl{display:grid;grid-template-columns:118px 1fr;gap:4px 10px;margin:0}" +
-    "#sl-panel dt{color:#5a6b78}#sl-panel dd{margin:0;font-variant-numeric:tabular-nums}" +
-    "#sl-panel .big{font-size:26px;font-weight:600;color:#0e6f82;margin:6px 0 2px}" +
-    "#sl-panel .warn{background:#fdecea;border-left:3px solid #c0392b;padding:8px 10px;margin:12px 0;font-size:12.5px}" +
-    "#sl-panel .hint{color:#5a6b78;font-size:12.5px}" +
-    "#sl-panel .disc{border-top:1px solid #d5dde3;padding:10px 16px;font-size:11.5px;color:#5a6b78;background:#f3f6f8}" +
-    "@media (max-width:820px){#sl-main{flex-direction:column}#sl-panel{width:auto;border-left:none;border-top:1px solid #d5dde3;max-height:45vh}}";
-  document.head.appendChild(css);
-
-  var wrap = document.createElement("div"); wrap.id = "sl-wrap";
-  wrap.innerHTML =
-    "<div id=\\"sl-bar\\"><h1>P(annual maximum sea level exceeds this station\'s own 1-in-N baseline level)</h1>" +
-    "<label>Year <input id=\\"sl-year\\" type=\\"range\\" min=\\"2000\\" max=\\"2100\\" step=\\"1\\" value=\\"" + D.init.Y + "\\"> <b id=\\"sl-year-v\\">" + D.init.Y + "</b></label>" +
-    "<label>Baseline return period <select id=\\"sl-N\\"><option>2</option><option>5</option><option selected>10</option><option>20</option><option>50</option></select> years</label></div>" +
-    "<div id=\\"sl-main\\"><div id=\\"sl-plot\\"></div><div id=\\"sl-panel\\"><div class=\\"body\\" id=\\"sl-body\\"></div>" +
-    "<div class=\\"disc\\"><b>What this is.</b> The probability that a station\'s annual maximum sea level exceeds the level that had a 1-in-N chance per year around 2000, in that station\'s own datum. " +
-    "The project holds no DEM and no absolute elevations, so this is not a probability that any land is flooded. Trend and scale between gauges come from a Gaussian-process interpolation; xi is a shared GEV shape.</div></div></div>";
-  document.body.appendChild(wrap);
-  document.getElementById("sl-plot").appendChild(el);
-  el.style.width = "100%%"; el.style.height = "100%%";
-  var empties = document.querySelectorAll("body > div:not(#sl-wrap)");
-  for (var q = 0; q < empties.length; q++) if (!empties[q].textContent.trim()) empties[q].remove();
-  Plotly.Plots.resize(el);
-  window.addEventListener("resize", function() { Plotly.Plots.resize(el); });
-
-  /* ---- controls ---- */
-  var yearEl = document.getElementById("sl-year"), nEl = document.getElementById("sl-N");
-  function cur() { return { Y: +yearEl.value, N: +nEl.value }; }
-  var last = null;
-  function refresh() {
-    var c = cur(); document.getElementById("sl-year-v").textContent = c.Y;
-    Plotly.restyle(el, { z: [fieldP(c.Y, c.N, 0)] }, [0]);
-    Plotly.restyle(el, { z: [stationP(c.Y, c.N)] }, [1]);
-    Plotly.restyle(el, { z: [nextP(c.Y, c.N)] }, [2]);
-    if (last) showPoint(last.lon, last.lat);
-  }
-  yearEl.addEventListener("input", refresh); nEl.addEventListener("change", refresh);
-
-  /* ---- click -> query panel ---- */
-  function haversineKm(lon1, lat1, lon2, lat2) {
-    var r = Math.PI / 180, dLat = (lat2 - lat1) * r, dLon = (lon2 - lon1) * r;
-    var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    return 2 * 6371 * Math.asin(Math.sqrt(a));
-  }
-  function fmtLon(lon) { return lon > 180 ? (360 - lon).toFixed(1) + "&deg;W" : lon.toFixed(1) + "&deg;E"; }
-  function pct(v) { return (100 * v).toFixed(1) + "%%"; }
-  function showPoint(lon, lat) {
-    last = { lon: lon, lat: lat };
-    var j = Math.round((lon - D.lon[0]) / (D.lon[NX - 1] - D.lon[0]) * (NX - 1));
-    var i = Math.round((lat - D.lat[0]) / (D.lat[NY - 1] - D.lat[0]) * (NY - 1));
-    j = Math.min(Math.max(j, 0), NX - 1); i = Math.min(Math.max(i, 0), NY - 1);
-    var k = i * NX + j, c = cur();
-    var med = pEx(D.mu_beta[k], Math.exp(D.mu_ls[k]), c.Y, c.N);
-    var lo  = pEx(D.mu_beta[k] - 1.645 * D.sd_beta[k], Math.exp(D.mu_ls[k] + 1.645 * D.sd_ls[k]), c.Y, c.N);
-    var hi  = pEx(D.mu_beta[k] + 1.645 * D.sd_beta[k], Math.exp(D.mu_ls[k] - 1.645 * D.sd_ls[k]), c.Y, c.N);
-    var sup = D.support[k], best = null;
-    D.stations.forEach(function(s) { var d = haversineKm(lon, lat, s.lon, s.lat); if (!best || d < best.d) best = { d: d, name: s.name }; });
-    var html = "<h2>Query</h2>" +
-      "<dl><dt>Location</dt><dd>" + fmtLon(D.lon[j]) + ", " + D.lat[i].toFixed(1) + "&deg;</dd>" +
-      "<dt>Year / baseline</dt><dd>" + c.Y + " / 1-in-" + c.N + "</dd></dl>" +
-      "<div class=\\"big\\">" + pct(med) + "</div><div class=\\"hint\\">P median &middot; 90%% credible interval " + pct(lo) + " &ndash; " + pct(hi) + "</div>" +
-      "<dl style=\\"margin-top:12px\\"><dt>Rise rate</dt><dd>" + D.mu_beta[k].toFixed(2) + " &plusmn; " + D.sd_beta[k].toFixed(2) + " mm/yr</dd>" +
-      "<dt>GEV scale</dt><dd>" + Math.exp(D.mu_ls[k]).toFixed(3) + " m</dd>" +
-      "<dt>Data support</dt><dd>" + pct(sup) + "</dd>" +
-      "<dt>Nearest gauge</dt><dd>" + best.name + ", " + Math.round(best.d) + " km</dd></dl>" +
-      (sup < 0.25 ? "<div class=\\"warn\\"><b>Weak data support</b> &mdash; posterior has reverted to the prior. The estimate here is the basin-wide mean rate, not local evidence; treat the number as a placeholder until a gauge is deployed nearby.</div>" : "") +
-      (k === D.next_pt.idx ? "<div class=\\"hint\\">This is where the lab should measure next (largest expected reduction of map uncertainty).</div>" : "");
-    document.getElementById("sl-body").innerHTML = html;
-  }
-  el.on("plotly_click", function(d) { var p = d.points[0]; showPoint(+p.x, +p.y); });
-  document.getElementById("sl-body").innerHTML = "<h2>Query</h2><div class=\\"hint\\">Click anywhere on the surface to read the probability, its 90%% credible interval, the data support and the nearest gauge. Move the year slider or change the baseline return period to recompute the whole field in the browser.</div>";
-}', payload)
-
-p <- plot_ly() |>
-  add_surface(x = g_lon, y = g_lat, z = z0, surfacecolor = c0, cmin = 0, cmax = 1, colorscale = support_scale,
-              colorbar = list(title = list(text = "data support"), len = 0.5), name = "P field",
-              hovertemplate = "lon %{x:.1f}, lat %{y:.1f}<br>P = %{z:.3f}<extra>click for details</extra>") |>
-  add_markers(x = stations$lon, y = stations$lat, z = sig4(stations$P_2050_N10), text = stations$Location, name = "tide gauge (own beta, sigma)",
-              marker = list(color = "white", size = 5, line = list(color = "#1b2a33", width = 1.5)),
-              hovertemplate = "%{text}<br>P = %{z:.3f}<extra></extra>") |>
-  add_markers(x = grid_deg[next_idx, 1], y = grid_deg[next_idx, 2], z = sig4(b0$med[next_idx]), name = "where the lab should measure next (max IPV reduction)",
-              marker = list(color = "#d2573a", size = 8, symbol = "diamond", line = list(color = "#1b2a33", width = 1)),
-              hovertemplate = "next measurement<br>lon %{x:.1f}, lat %{y:.1f}<extra></extra>") |>
-  layout(showlegend = TRUE, legend = list(orientation = "h", y = 0.02, x = 0.02, bgcolor = "rgba(255,255,255,.7)"),
-         margin = list(l = 0, r = 0, t = 10, b = 0),
-         scene = list(xaxis = list(title = "longitude (deg E)"), yaxis = list(title = "latitude"),
-                      zaxis = list(title = "P(exceed own 1-in-N baseline)", range = c(0, 1)),
-                      aspectratio = list(x = 1.6, y = 1, z = 0.6), camera = list(eye = list(x = 1.5, y = -1.7, z = 0.9)))) |>
-  config(displaylogo = FALSE, responsive = TRUE) |>
-  onRender(js)
-
-dir.create("docs", showWarnings = FALSE)
-out <- normalizePath("docs", mustWork = TRUE)
-saveWidget(p, file.path(out, "app.html"), selfcontained = TRUE, title = "SeaLevelLab query", libdir = NULL)
-unlink(file.path(out, "app_files"), recursive = TRUE)
-cat(sprintf("\nwrote docs/app.html  (%.2f MB)\n", file.size("docs/app.html") / 1e6))
+## 10d. build-time assertions for the export
+for (nm in c("mu_beta", "sd_beta", "mu_ls", "sd_ls", "support")) if (length(app_data[[nm]]) != NX * NY) stop("check: ", nm, " must have 160 x 120 values")
+if (!all(rates$lon >= LON[1] & rates$lon <= LON[2])) stop("check: every station lon360 must lie in [140, 210]")
+for (t in vendor_targets) { f <- file.path("docs/vendor", t); if (!file.exists(f) || file.size(f) <= 10e3) stop("check: vendor file missing or too small: ", t) }
+cat("export checks: all passed\n")
