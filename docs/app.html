@@ -39,7 +39,6 @@
   #tabs { display:flex; gap:4px; padding:8px 16px 0; border-bottom:1px solid var(--line); }
   #tabs button { border:none; background:none; padding:8px 12px; font-size:13px; color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; }
   #tabs button.on { color:var(--tide); border-bottom-color:var(--tide); font-weight:600; }
-  #tabs button[hidden] { display:none; }
   .tabpane { display:none; overflow:auto; flex:1; padding:14px 16px; }
   .tabpane.on { display:block; }
   .big { font-size:38px; font-weight:600; color:var(--tide); line-height:1.1; font-variant-numeric:tabular-nums; }
@@ -83,7 +82,7 @@
   </header>
   <div id="tabs">
     <button id="tab-point" class="on">Point</button>
-    <button id="tab-station" hidden>Station</button>
+    <button id="tab-station">Station</button>
   </div>
   <section id="pane-point" class="tabpane on">
     <div class="big" id="p-big">&ndash;</div>
@@ -197,9 +196,12 @@
   /* gauges + next site */
   var stationLayer = L.layerGroup().addTo(map);
   D.stations.forEach(function (s, idx) {
+    var pick = function () { openPanel(s.lon360, s.lat, idx); };
+    /* invisible wide hit circle under the visible marker, and a clickable name label: any of them selects the gauge */
+    L.circleMarker([s.lat, s.lon360], { radius: 14, stroke: false, fillColor: "#000", fillOpacity: 0.001, bubblingMouseEvents: false }).on("click", pick).addTo(stationLayer);
     L.circleMarker([s.lat, s.lon360], { radius: 6, color: "#1b2a33", weight: 1.5, fillColor: "#ffffff", fillOpacity: 1, bubblingMouseEvents: false })
-      .bindTooltip(s.Location, { permanent: true, direction: "right", offset: [6, 0], className: "st-label" })
-      .on("click", function () { openPanel(s.lon360, s.lat, idx); })
+      .bindTooltip(s.Location, { permanent: true, direction: "right", offset: [6, 0], className: "st-label", interactive: true })
+      .on("click", pick)
       .addTo(stationLayer);
   });
   L.circleMarker([D.next_site.lat, D.next_site.lon360], { radius: 7, color: "#1b2a33", weight: 1, fillColor: "#d2573a", fillOpacity: 1, bubblingMouseEvents: false })
@@ -247,10 +249,14 @@
     if (clickMarker) map.removeLayer(clickMarker);
     clickMarker = L.circleMarker([lat, lon], { radius: 9, color: "#0e6f82", weight: 2, dashArray: "3 3", fillColor: "#0e6f82", fillOpacity: 0.25, interactive: false }).addTo(map);
     document.getElementById("hint").classList.add("off");
-    document.getElementById("tab-station").hidden = stationIdx === null;
-    showTab(stationIdx === null ? "point" : "point");
-    fillPoint(); draw3d();
-    if (stationIdx !== null) fillStation();
+    if (stationIdx === null) {                       // no gauge clicked: the Station tab shows the nearest gauge
+      var nearIdx = 0, nearD = Infinity;
+      D.stations.forEach(function (s, q) { var d = M.haversineKm(lon, lat, s.lon360, s.lat); if (d < nearD) { nearD = d; nearIdx = q; } });
+      state.station = nearIdx; state.stationDistKm = nearD; state.stationClicked = false;
+    } else { state.stationDistKm = 0; state.stationClicked = true; }
+    document.getElementById("tab-station").textContent = (state.stationClicked ? "Station: " : "Nearest gauge: ") + D.stations[state.station].Location;
+    showTab("point");
+    fillPoint(); draw3d(); fillStation();
     panel.classList.add("open");
     /* keep the clicked point visible left of the panel */
     var pt = map.latLngToContainerPoint([lat, lon]), visibleW = map.getSize().x - panel.getBoundingClientRect().width;
@@ -281,7 +287,7 @@
     var sel = state.sel, k = sel.k, c = cur();
     var b = M.pBand(D.mu_beta[k], D.sd_beta[k], D.mu_ls[k], D.sd_ls[k], XI, c.Y, c.N);
     var near = nearestStation(sel.lon, sel.lat), sup = D.support[k];
-    document.getElementById("p-title").textContent = state.station !== null ? D.stations[state.station].Location : "Point";
+    document.getElementById("p-title").textContent = state.stationClicked ? D.stations[state.station].Location : "Point";
     document.getElementById("p-sub").textContent = fmtLon(sel.lon) + ", " + fmtLat(sel.lat) + "  ·  " + c.Y + ", baseline 1-in-" + c.N;
     document.getElementById("p-big").textContent = pct(b.med);
     document.getElementById("p-band").innerHTML = "P median · 90% credible interval [" + pct(b.lo) + ", " + pct(b.hi) + "]";
@@ -342,7 +348,7 @@
     var s = D.stations[state.station], c = cur();
     var p = M.pExceed(s.beta, s.sigma, XI, c.Y, c.N);
     document.getElementById("s-big").textContent = pct(p);
-    document.getElementById("s-band").textContent = s.Location + " with its own β and σ · " + c.Y + ", baseline 1-in-" + c.N;
+    document.getElementById("s-band").textContent = (state.stationClicked ? "" : Math.round(state.stationDistKm) + " km from the point you clicked · ") + s.Location + " with its own β and σ · " + c.Y + ", baseline 1-in-" + c.N;
     document.getElementById("s-beta").textContent = s.beta.toFixed(2) + " mm/yr";
     document.getElementById("s-sigma").textContent = s.sigma.toFixed(3) + " m";
     document.getElementById("s-mu0").textContent = s.mu0.toFixed(3) + " m (own datum)";
