@@ -1,3 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Five phases: the math bridge from INLA to Gaussian-process surrogates, the belief-MDP design, the agentic workflow, the benchmark, and the interview pitch.">
+<meta property="og:title" content="SeaLevelLab — engineering report">
+<meta property="og:description" content="Five phases: the math bridge from INLA to Gaussian-process surrogates, the belief-MDP design, the agentic workflow, the benchmark, and the interview pitch.">
+<meta property="og:image" content="https://yanlong-iao.github.io/SeaLevelLab/belief_map.png">
+<meta property="og:url" content="https://yanlong-iao.github.io/SeaLevelLab/report.html">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="SeaLevelLab — engineering report">
+<meta name="twitter:description" content="Five phases: the math bridge from INLA to Gaussian-process surrogates, the belief-MDP design, the agentic workflow, the benchmark, and the interview pitch.">
+<meta name="twitter:image" content="https://yanlong-iao.github.io/SeaLevelLab/belief_map.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%230e6f82'/%3E%3Cpath d='M10 36c6-8 12-8 18 0s12 8 18 0 6-8 8-6' fill='none' stroke='%23fff' stroke-width='5' stroke-linecap='round'/%3E%3Cpath d='M10 46c6-8 12-8 18 0s12 8 18 0' fill='none' stroke='%23bfe3ea' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+.sl-nav{position:sticky;top:0;z-index:2000;display:flex;align-items:center;gap:14px;height:44px;padding:0 14px;background:#fff;border-bottom:1px solid #d5dde3;font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;font-size:13.5px;box-sizing:border-box}
+.sl-brand{font-weight:700;color:#0e6f82;text-decoration:none;letter-spacing:.01em;white-space:nowrap}
+.sl-links{display:flex;gap:2px;overflow-x:auto;white-space:nowrap;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.sl-links::-webkit-scrollbar{display:none}
+.sl-links a{color:#5a6b78;text-decoration:none;padding:6px 10px;border-radius:4px;display:inline-flex;align-items:center;gap:6px}
+.sl-links a:hover{background:#eef3f6;color:#1b2a33}
+.sl-links a.on{color:#0e6f82;font-weight:600;background:#e6f2f5}
+.sl-tag{font-size:10.5px;color:#8a2f18;background:#fbe6df;border-radius:3px;padding:1px 5px;font-weight:500}
+</style>
 <title>SeaLevelLab</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
@@ -31,7 +57,7 @@ pre.code code{background:none;padding:0;font-size:inherit;color:inherit}
 pre.trace{background:var(--paper-2);border-left:3px solid var(--tide);padding:14px 16px;overflow-x:auto;font-size:.76rem;line-height:1.5;white-space:pre;margin:1rem 0 1.4rem}
 .wrap{max-width:1120px;margin:0 auto;display:grid;grid-template-columns:200px minmax(0,1fr);gap:48px}
 @media (max-width:860px){.wrap{grid-template-columns:minmax(0,1fr)}}
-nav.toc{position:sticky;top:24px;align-self:start;padding-top:64px;font-size:.86rem}
+nav.toc{position:sticky;top:64px;align-self:start;padding-top:64px;font-size:.86rem}
 @media (max-width:860px){nav.toc{position:static;padding-top:0;border-bottom:1px solid var(--line);padding-bottom:12px;margin-top:24px}}
 nav.toc ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
 @media (max-width:860px){nav.toc ol{flex-direction:row;flex-wrap:wrap;gap:6px 14px}}
@@ -80,10 +106,11 @@ li b,p b{font-weight:600}
 mjx-container{color:var(--ink)}
 :focus-visible{outline:2px solid var(--tide);outline-offset:2px}
 @media (prefers-reduced-motion: reduce){*{scroll-behavior:auto}}
-html{scroll-behavior:smooth}
+html{scroll-behavior:smooth;scroll-padding-top:56px}
 </style>
 <script>window.MathJax={tex:{inlineMath:[['\\(','\\)']],displayMath:[['\\[','\\]']]},svg:{fontCache:'global'}};</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-svg.js"></script>
+<nav class="sl-nav" aria-label="Site"><a class="sl-brand" href="./">SeaLevelLab</a><div class="sl-links"><a href="./">Overview</a><a href="app.html">Interactive map</a><a href="report.html" class="on">Engineering report</a><a href="demo.html">Full analysis <span class="sl-tag">~10 MB, slow on mobile</span></a><a href="https://github.com/yanlong-iao/SeaLevelLab" target="_blank" rel="noopener">GitHub</a></div></nav>
 <div class="wrap">
 <nav class="toc" aria-label="Phases"><ol>
 <li><a href="#p1"><span class="n">01</span>Comprehension &amp; Math Bridge</a></li>

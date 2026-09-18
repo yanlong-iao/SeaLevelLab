@@ -6,7 +6,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](ai4s/requirements.txt)
 [![R 4.5 · Quarto](https://img.shields.io/badge/R-4.5%20%C2%B7%20Quarto-276DC3.svg)](flood_ai4s.qmd)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Live demo](https://img.shields.io/badge/demo-GitHub%20Pages-0E7A8A.svg)](https://yanlong-iao.github.io/SeaLevelLab/)
+[![Live site](https://img.shields.io/badge/live%20site-GitHub%20Pages-0E7A8A.svg)](https://yanlong-iao.github.io/SeaLevelLab/)
 
 **Interactive query app:** [docs/app.html](https://yanlong-iao.github.io/SeaLevelLab/app.html) — a pan-and-zoom map of the tropical Pacific with the exceedance-probability field, P(annual maximum sea level exceeds this station's own 1-in-N baseline level), painted over it for any year 2000–2100 and baseline return period. Click any location and a panel slides in with the probability, its 90 % credible interval, a local 3D surface (±6° × ±5°), data support and the nearest gauge; click a gauge for its annual maxima and fitted GEV return-level curve. Non-stationary GEV on de-trended annual maxima; R computes, the page is static (only the basemap tiles are fetched).
 
@@ -101,8 +101,9 @@ pytest tests                   # 8 smoke tests, also run in CI
 ```
 
 **RStudio live demo** — open [`flood_ai4s.qmd`](flood_ai4s.qmd) and press *Render* (INLA, plotly, R6, reticulate, ellmer).
-The rendered result is served at **https://yanlong-iao.github.io/SeaLevelLab/** and the five-phase engineering write-up
-(math bridge, MDP design, agentic workflow, benchmark, interview pitch) at **https://yanlong-iao.github.io/SeaLevelLab/report.html**.
+The rendered notebook is served at **https://yanlong-iao.github.io/SeaLevelLab/demo.html** (~10 MB), the five-phase engineering write-up
+(math bridge, MDP design, agentic workflow, benchmark, interview pitch) at **https://yanlong-iao.github.io/SeaLevelLab/report.html**,
+and the site landing page at **https://yanlong-iao.github.io/SeaLevelLab/**.
 
 ## Repository layout
 
@@ -122,7 +123,11 @@ The rendered result is served at **https://yanlong-iao.github.io/SeaLevelLab/** 
 │   ├── run_demo.py          benchmark + figure + transcript
 │   ├── tests/               smoke tests (Gymnasium contract, every agent closes the loop, tool guards)
 │   └── outputs/             results.json, belief_map.png, agent_transcript.txt
-└── docs/                    GitHub Pages: rendered demo (index.html), report (report.html), query app (app.html + app_math.js + app_data.js + vendor/)
+└── docs/                    GitHub Pages site (.nojekyll)
+    ├── index.html           landing page: what the project is, entry points, method, data, the probability definition
+    ├── app.html             interactive map (+ app_math.js, app_data.js, vendor/; plotly is lazy-loaded on first panel open)
+    ├── report.html          engineering report
+    └── demo.html            full Quarto analysis (~10 MB)
 ```
 
 ## Data

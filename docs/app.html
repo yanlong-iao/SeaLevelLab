@@ -3,19 +3,39 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SeaLevelLab query</title>
+<title>SeaLevelLab · interactive map</title>
+<meta name="description" content="Click anywhere in the tropical Pacific for the probability that a station's annual maximum sea level exceeds its own 1-in-N baseline level, with a local 3D view and the nearest gauge's GEV fit.">
+<meta property="og:title" content="SeaLevelLab — interactive sea-level exceedance map">
+<meta property="og:description" content="Click anywhere in the tropical Pacific for the probability that a station's annual maximum sea level exceeds its own 1-in-N baseline level, with a local 3D view and the nearest gauge's GEV fit.">
+<meta property="og:image" content="https://yanlong-iao.github.io/SeaLevelLab/belief_map.png">
+<meta property="og:url" content="https://yanlong-iao.github.io/SeaLevelLab/app.html">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="SeaLevelLab — interactive sea-level exceedance map">
+<meta name="twitter:description" content="Click anywhere in the tropical Pacific for the probability that a station's annual maximum sea level exceeds its own 1-in-N baseline level, with a local 3D view and the nearest gauge's GEV fit.">
+<meta name="twitter:image" content="https://yanlong-iao.github.io/SeaLevelLab/belief_map.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%230e6f82'/%3E%3Cpath d='M10 36c6-8 12-8 18 0s12 8 18 0 6-8 8-6' fill='none' stroke='%23fff' stroke-width='5' stroke-linecap='round'/%3E%3Cpath d='M10 46c6-8 12-8 18 0s12 8 18 0' fill='none' stroke='%23bfe3ea' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="vendor/leaflet.css">
 <style>
   :root { --ink:#1b2a33; --muted:#5a6b78; --line:#d5dde3; --tide:#0e6f82; --coral:#d2573a; --panel-w:40%; }
-  html, body { margin:0; height:100%; font-family:-apple-system, "Segoe UI", Helvetica, Arial, sans-serif; color:var(--ink); background:#e9eef2; }
-  #map { position:absolute; inset:0; }
+  html, body { margin:0; height:100%; overflow:hidden; font-family:-apple-system, "Segoe UI", Helvetica, Arial, sans-serif; color:var(--ink); background:#e9eef2; }
+  body { position:fixed; inset:0; width:100%; }   /* app-style page: nothing scrolls except the panel body; also stops the off-screen panel from creating sideways scroll on phones */
+  #map { position:absolute; top:44px; left:0; right:0; bottom:0; }
+.sl-nav{position:sticky;top:0;z-index:2000;display:flex;align-items:center;gap:14px;height:44px;padding:0 14px;background:#fff;border-bottom:1px solid #d5dde3;font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;font-size:13.5px;box-sizing:border-box}
+.sl-brand{font-weight:700;color:#0e6f82;text-decoration:none;letter-spacing:.01em;white-space:nowrap}
+.sl-links{display:flex;gap:2px;overflow-x:auto;white-space:nowrap;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.sl-links::-webkit-scrollbar{display:none}
+.sl-links a{color:#5a6b78;text-decoration:none;padding:6px 10px;border-radius:4px;display:inline-flex;align-items:center;gap:6px}
+.sl-links a:hover{background:#eef3f6;color:#1b2a33}
+.sl-links a.on{color:#0e6f82;font-weight:600;background:#e6f2f5}
+.sl-tag{font-size:10.5px;color:#8a2f18;background:#fbe6df;border-radius:3px;padding:1px 5px;font-weight:500}
   .leaflet-container { font:inherit; }
   .st-label { background:rgba(255,255,255,.85); border:1px solid var(--line); border-radius:3px; padding:1px 5px; font-size:11px; color:var(--ink); box-shadow:none; }
   .st-label::before { display:none; }
   .next-label { background:#fbe6df; border-color:var(--coral); color:#8a2f18; font-weight:600; }
 
   /* top-right controls */
-  #controls { position:absolute; top:10px; right:10px; z-index:1000; width:300px; background:rgba(255,255,255,.96); border:1px solid var(--line); border-radius:6px; box-shadow:0 2px 8px rgba(0,0,0,.12); padding:12px 14px; font-size:13px; }
+  #controls { position:absolute; top:54px; right:10px; z-index:1000; width:300px; background:rgba(255,255,255,.96); border:1px solid var(--line); border-radius:6px; box-shadow:0 2px 8px rgba(0,0,0,.12); padding:12px 14px; font-size:13px; }
   #controls h1 { font-size:13.5px; font-weight:600; margin:0 0 10px; line-height:1.35; }
   #controls label { display:flex; align-items:center; gap:8px; margin:6px 0; }
   #controls label span.k { width:118px; color:var(--muted); }
@@ -30,7 +50,7 @@
   #hint.off { opacity:0; }
 
   /* slide-in panel */
-  #panel { position:absolute; top:0; right:0; bottom:0; width:var(--panel-w); min-width:380px; max-width:640px; background:#fff; border-left:1px solid var(--line); box-shadow:-4px 0 16px rgba(0,0,0,.12); z-index:1100; transform:translateX(105%); transition:transform .28s ease; display:flex; flex-direction:column; }
+  #panel { position:absolute; top:44px; right:0; bottom:0; width:var(--panel-w); min-width:380px; max-width:640px; background:#fff; border-left:1px solid var(--line); box-shadow:-4px 0 16px rgba(0,0,0,.12); z-index:1100; transform:translateX(105%); transition:transform .28s ease; display:flex; flex-direction:column; }
   #panel.open { transform:translateX(0); }
   #panel header { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--line); }
   #panel header .where { font-size:13px; color:var(--muted); flex:1; }
@@ -55,13 +75,23 @@
   .disc { border-top:1px solid var(--line); padding:10px 16px; font-size:11.5px; color:var(--muted); background:#f3f6f8; line-height:1.45; }
   .hint { color:var(--muted); font-size:12.5px; }
   h3 { font-size:12.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin:14px 0 6px; }
+  .loading { display:flex; align-items:center; justify-content:center; height:100%; color:var(--muted); font-size:13px; background:#f7f9fa; border:1px dashed var(--line); border-radius:6px; }
   @media (max-width: 820px) {
     #panel { width:100%; min-width:0; max-width:none; }
-    #controls { width:auto; left:10px; right:10px; }
+    /* narrow screens: the controls become a bottom bar so the map stays clear */
+    #controls { top:auto; bottom:0; left:0; right:0; width:auto; border-radius:0; border-width:1px 0 0; padding:8px 12px 10px; box-shadow:0 -2px 8px rgba(0,0,0,.10); }
+    #controls h1 { font-size:12px; margin-bottom:4px; }
+    #controls label { margin:3px 0; }
+    #controls label span.k { width:96px; font-size:12px; }
+    #controls .note { display:none; }
+    #cbar { margin:6px 0 2px; }
+    #hint { bottom:auto; top:56px; }
+    .leaflet-bottom { bottom:150px; }
   }
 </style>
 </head>
 <body>
+<nav class="sl-nav" aria-label="Site"><a class="sl-brand" href="./">SeaLevelLab</a><div class="sl-links"><a href="./">Overview</a><a href="app.html" class="on">Interactive map</a><a href="report.html">Engineering report</a><a href="demo.html">Full analysis <span class="sl-tag">~10 MB, slow on mobile</span></a><a href="https://github.com/yanlong-iao/SeaLevelLab" target="_blank" rel="noopener">GitHub</a></div></nav>
 <div id="map" aria-label="Map of the tropical Pacific study region"></div>
 
 <div id="controls">
@@ -115,7 +145,6 @@
 </aside>
 
 <script src="vendor/leaflet.js"></script>
-<script src="vendor/plotly.min.js"></script>
 <script src="app_math.js"></script>
 <script src="app_data.js"></script>
 <script>
@@ -125,6 +154,25 @@
   var NX = D.nx, NY = D.ny, XI = D.xi;
   /* Field arrays are flattened LONGITUDE-FASTEST: k = i_lat * NX + j_lon, with D.lat[0] = -25 (south). */
   var BOUNDS = [[-25, 140], [12, 210]];                 // longitudes are 0-360 everywhere in this page
+
+  /* ------------------------------------------------------------------ plotly is lazy-loaded on the first panel open (3.6 MB the map never needs) */
+  var plotlyPromise = null;
+  function ensurePlotly() {
+    if (window.Plotly) return Promise.resolve();
+    if (plotlyPromise) return plotlyPromise;
+    plotlyPromise = new Promise(function (resolve, reject) {
+      var sc = document.createElement("script"); sc.src = "vendor/plotly.min.js"; sc.async = true;
+      sc.onload = resolve; sc.onerror = function () { plotlyPromise = null; reject(new Error("plotly failed to load")); };
+      document.head.appendChild(sc);
+    });
+    return plotlyPromise;
+  }
+  function withPlotly(target, fn) {
+    if (window.Plotly) { fn(); return; }
+    var el = document.getElementById(target);
+    if (el && !el.querySelector(".loading")) el.innerHTML = '<div class="loading">Loading the 3D view (3.6 MB, first time only)&hellip;</div>';
+    ensurePlotly().then(fn, function () { if (el) el.innerHTML = '<div class="loading">The 3D library could not be loaded. The numbers above are still valid.</div>'; });
+  }
 
   /* ------------------------------------------------------------------ shared state */
   var state = { Y: 2050, N: 10, sel: null, station: null, mode3d: "local" };
@@ -313,6 +361,7 @@
   }
   function draw3d() {
     var sel = state.sel; if (!sel) return;
+    if (!window.Plotly) { withPlotly("plot3d", draw3d); return; }
     var c = cur(), traces, layout;
     var pSel = pAt(sel.k, c.Y, c.N);
     var stem = { type: "scatter3d", mode: "lines+markers", x: [sel.lon, sel.lon], y: [sel.lat, sel.lat], z: [0, pSel],
@@ -335,7 +384,7 @@
       layout = { title: { text: "Whole study region", font: { size: 12 } }, showlegend: true, legend: { orientation: "h", y: 0, x: 0, font: { size: 10 } }, margin: { l: 0, r: 0, t: 28, b: 0 },
                  scene: Object.assign({}, sceneBase, { aspectratio: { x: 1.6, y: 1, z: 0.6 }, camera: { eye: { x: 1.5, y: -1.7, z: 0.9 } } }) };
     }
-    Plotly.react("plot3d", traces, layout, { displaylogo: false, responsive: true });
+    Plotly.react("plot3d", traces, layout, { displaylogo: false, responsive: true, displayModeBar: window.innerWidth < 600 ? false : "hover" });
   }
   document.getElementById("btn-region").addEventListener("click", function () {
     state.mode3d = state.mode3d === "local" ? "region" : "local";
@@ -354,6 +403,7 @@
     document.getElementById("s-mu0").textContent = s.mu0.toFixed(3) + " m (own datum)";
     document.getElementById("s-xi").textContent = XI.toFixed(3);
     if (!document.getElementById("pane-station").classList.contains("on")) return;
+    if (!window.Plotly) { withPlotly("plot-rl", fillStation); return; }
 
     /* return-level plot: fitted GEV curve vs empirical plotting positions (Weibull T = (n+1)/rank) */
     var vals = s.amax.map(function (r) { return r[1]; }).sort(function (a, b) { return b - a; }), n = vals.length;
@@ -366,7 +416,7 @@
       { x: empT, y: vals, mode: "markers", name: "annual maxima (Weibull positions)", marker: { color: "#1b2a33", size: 6 } },
       { x: [c.N], y: [rlN], mode: "markers", name: "1-in-" + c.N + " baseline level", marker: { color: "#d2573a", size: 10, symbol: "diamond" } }],
       { margin: { l: 50, r: 10, t: 10, b: 40 }, xaxis: { type: "log", title: "return period (years)" }, yaxis: { title: "level (m, own datum)" },
-        legend: { orientation: "h", y: 1.15, font: { size: 10 } }, showlegend: true }, { displaylogo: false, responsive: true });
+        legend: { orientation: "h", y: 1.15, font: { size: 10 } }, showlegend: true }, { displaylogo: false, responsive: true, displayModeBar: false });
 
     /* time series of the de-trended annual maxima, with the current baseline level */
     var yrs = s.amax.map(function (r) { return r[0]; }), am = s.amax.map(function (r) { return r[1]; });
@@ -374,12 +424,12 @@
       { x: yrs, y: am, mode: "markers", name: "de-trended annual maximum", marker: { color: "#1b2a33", size: 6 } },
       { x: [Math.min.apply(null, yrs), Math.max.apply(null, yrs)], y: [rlN, rlN], mode: "lines", name: "1-in-" + c.N + " level", line: { color: "#d2573a", dash: "dash" } }],
       { margin: { l: 50, r: 10, t: 10, b: 40 }, xaxis: { title: "year" }, yaxis: { title: "level (m, own datum)" }, legend: { orientation: "h", y: 1.15, font: { size: 10 } } },
-      { displaylogo: false, responsive: true });
+      { displaylogo: false, responsive: true, displayModeBar: false });
   }
 
   /* ------------------------------------------------------------------ boot */
   paintRaster();
-  window.addEventListener("resize", function () { if (state.sel) { Plotly.Plots.resize("plot3d"); } });
+  window.addEventListener("resize", function () { if (state.sel && window.Plotly) { Plotly.Plots.resize("plot3d"); } });
 })();
 </script>
 </body>
