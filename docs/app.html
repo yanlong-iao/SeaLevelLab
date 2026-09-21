@@ -88,6 +88,38 @@
     #hint { bottom:auto; top:56px; }
     .leaflet-bottom { bottom:150px; }
   }
+
+  /* ---- raster mode switch ---- */
+  #modes { display:flex; gap:3px; margin:9px 0 2px; }
+  #modes button { flex:1; font:inherit; font-size:11px; padding:4px 2px; border:1px solid var(--line); background:#fff; color:var(--muted); border-radius:4px; cursor:pointer; }
+  #modes button.on { background:var(--tide); border-color:var(--tide); color:#fff; font-weight:600; }
+  #tour-start { width:100%; margin-top:9px; font:inherit; font-size:12px; font-weight:600; padding:7px; border:1px solid var(--tide); background:var(--tide); color:#fff; border-radius:5px; cursor:pointer; }
+  #tour-start:hover { background:#0b5a6a; }
+  /* ---- guided tour card ---- */
+  #tour { position:absolute; left:14px; bottom:14px; z-index:1400; width:430px; max-width:calc(100vw - 28px); background:rgba(255,255,255,.975);
+          border:1px solid var(--line); border-left:4px solid var(--tide); border-radius:7px; box-shadow:0 4px 18px rgba(0,0,0,.18); padding:14px 16px 12px; display:none; }
+  #tour.on { display:block; }
+  body.tour-on .leaflet-bottom.leaflet-left { bottom:212px; }          /* keep the layers control clear of the tour card */
+  body.tour-on #hint { display:none; }
+  #tour .hd { display:flex; align-items:baseline; gap:9px; margin-bottom:5px; }
+  #tour .step-n { font-size:11px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--tide); white-space:nowrap; }
+  #tour h2 { font-size:15px; margin:0; line-height:1.3; letter-spacing:-.01em; }
+  #tour p { margin:0 0 9px; font-size:13px; line-height:1.5; color:#233; }
+  #tour p b { color:var(--tide); }
+  #tour .ft { display:flex; align-items:center; gap:8px; }
+  #tour .dots { display:flex; gap:4px; flex:1; }
+  #tour .dots i { width:6px; height:6px; border-radius:50%; background:#cfd9df; display:block; }
+  #tour .dots i.on { background:var(--tide); }
+  #tour button { font:inherit; font-size:12.5px; padding:6px 13px; border-radius:5px; border:1px solid var(--line); background:#fff; color:var(--ink); cursor:pointer; }
+  #tour button.pri { background:var(--tide); border-color:var(--tide); color:#fff; font-weight:600; }
+  #tour button:disabled { opacity:.4; cursor:default; }
+  #tour .x { position:absolute; top:7px; right:9px; border:0; background:none; font-size:19px; line-height:1; color:var(--muted); padding:2px 5px; }
+  #tour kbd { font:inherit; font-size:10.5px; border:1px solid var(--line); border-bottom-width:2px; border-radius:3px; padding:0 4px; color:var(--muted); }
+  @media (max-width:760px) {
+    body.tour-on .leaflet-bottom.leaflet-left { bottom:270px; }
+    #tour { left:0; right:0; bottom:0; width:auto; max-width:none; border-radius:0; border-left-width:0; border-top:3px solid var(--tide); padding:11px 13px 10px; }
+    #tour h2 { font-size:14px; } #tour p { font-size:12.5px; }
+  }
 </style>
 </head>
 <body>
@@ -100,10 +132,26 @@
   <label><span class="k">Baseline return period</span><select id="N"><option>2</option><option>5</option><option selected>10</option><option>20</option><option>50</option></select>&nbsp;years</label>
   <div id="cbar"></div>
   <div id="cbar-ticks"><span>P = 0</span><span>0.25</span><span>0.5</span><span>0.75</span><span>1</span></div>
+  <div id="modes">
+    <button data-m="p" class="on">Risk P</button><button data-m="beta">Rise rate</button><button data-m="sd">Uncertainty</button><button data-m="support">Data support</button>
+  </div>
   <div class="note">Colour = probability for the chosen year and baseline. Opacity = data support from the 13 gauges; faint cells have reverted to the prior. Click anywhere for the local 3D view.</div>
+  <button id="tour-start">▶︎  Guided tour · 9 steps</button>
   <div id="offline">offline basemap &mdash; tiles unavailable, showing coastline only</div>
 </div>
 <div id="hint">Click the map to query a location</div>
+
+<div id="tour" role="region" aria-label="Guided tour">
+  <button class="x" id="tour-x" title="Exit tour (Esc)">&times;</button>
+  <div class="hd"><span class="step-n" id="tour-n"></span><h2 id="tour-t"></h2></div>
+  <p id="tour-b"></p>
+  <div class="ft">
+    <div class="dots" id="tour-dots"></div>
+    <kbd>&larr;</kbd><kbd>&rarr;</kbd>
+    <button id="tour-prev">Back</button>
+    <button id="tour-next" class="pri">Next</button>
+  </div>
+</div>
 
 <aside id="panel" aria-live="polite">
   <header>
@@ -175,7 +223,7 @@
   }
 
   /* ------------------------------------------------------------------ shared state */
-  var state = { Y: 2050, N: 10, sel: null, station: null, mode3d: "local" };
+  var state = { Y: 2050, N: 10, sel: null, station: null, mode3d: "local", raster: "p" };
   function cur() { return { Y: state.Y, N: state.N }; }
   function pAt(k, Y, N) { return M.pExceed(D.mu_beta[k], Math.exp(D.mu_ls[k]), XI, Y, N); }
 
@@ -231,8 +279,11 @@
     for (var i = 0; i < NY; i++) {
       var row = M.rowForLat(D.lat[i], D.lat);        // y FLIP: D.lat[0] is the south edge, canvas row 0 is the north edge
       for (var j = 0; j < NX; j++) {
-        var k = i * NX + j, p = pAt(k, c.Y, c.N), s = D.support[k];
-        var rgb = colorP(p), alpha = s < 0.25 ? 0.15 : s;
+        var k = i * NX + j, s = D.support[k], rgb, alpha;
+        if (state.raster === "p") { rgb = colorP(pAt(k, c.Y, c.N)); alpha = s < 0.25 ? 0.15 : s; }
+        else if (state.raster === "beta") { rgb = ramp(BETA_STOPS, (D.mu_beta[k] - RB[0]) / (RB[1] - RB[0])); alpha = s < 0.25 ? 0.2 : s; }
+        else if (state.raster === "sd") { rgb = ramp(SD_STOPS, (D.sd_beta[k] - RS[0]) / (RS[1] - RS[0])); alpha = 0.78; }
+        else { rgb = ramp(SUP_STOPS, s); alpha = 0.78; }
         var o = (row * NX + j) * 4;
         img.data[o] = rgb[0]; img.data[o + 1] = rgb[1]; img.data[o + 2] = rgb[2]; img.data[o + 3] = Math.round(255 * alpha);
       }
@@ -279,7 +330,7 @@
     state.Y = +yearEl.value; state.N = +nEl.value;
     document.getElementById("year-v").textContent = state.Y;
     paintRaster();
-    if (state.sel) { fillPoint(); draw3d(); if (state.station !== null) fillStation(); }
+    if (state.sel) { fillPoint(); if (!animating) { draw3d(); if (state.station !== null) fillStation(); } }
   }
   yearEl.addEventListener("input", refresh);
   nEl.addEventListener("change", refresh);
@@ -427,7 +478,145 @@
       { displaylogo: false, responsive: true, displayModeBar: false });
   }
 
+
+  /* ------------------------------------------------------------------ raster modes */
+  var BETA_STOPS = [[0,[237,248,251]],[0.5,[102,194,164]],[1,[0,88,36]]];
+  var SD_STOPS   = [[0,[254,235,226]],[0.5,[221,52,151]],[1,[73,0,106]]];
+  var SUP_STOPS  = [[0,[236,236,236]],[0.25,[191,227,234]],[0.6,[43,157,176]],[1,[8,58,77]]];
+  function ramp(stops, t) {
+    t = t < 0 ? 0 : (t > 1 ? 1 : t);
+    for (var i = 1; i < stops.length; i++) if (t <= stops[i][0]) {
+      var a = stops[i-1], b = stops[i], u = (t - a[0]) / (b[0] - a[0]);
+      return [a[1][0]+u*(b[1][0]-a[1][0]), a[1][1]+u*(b[1][1]-a[1][1]), a[1][2]+u*(b[1][2]-a[1][2])];
+    }
+    return stops[stops.length-1][1];
+  }
+  function rng(arr) { var lo = Infinity, hi = -Infinity; for (var i=0;i<arr.length;i++){ if(arr[i]<lo)lo=arr[i]; if(arr[i]>hi)hi=arr[i]; } return [lo,hi]; }
+  var RB = rng(D.mu_beta), RS = rng(D.sd_beta);
+
+  var CBAR = {
+    p:       { stops: P_STOPS,    ticks: ["P = 0","0.25","0.5","0.75","1"],
+               note: "Colour = probability for the chosen year and baseline. Opacity = data support; faint cells have reverted to the prior." },
+    beta:    { stops: BETA_STOPS, ticks: [RB[0].toFixed(1)+" mm/yr","","","",RB[1].toFixed(1)+" mm/yr"],
+               note: "Posterior mean rise rate from the Matérn GP fitted to the 13 gauges — the same field R-INLA's SPDE model produces." },
+    sd:      { stops: SD_STOPS,   ticks: [RS[0].toFixed(2)+" mm/yr","","","",RS[1].toFixed(2)+" mm/yr"],
+               note: "Posterior standard deviation of the rise rate. This is the map every acquisition function reads when it chooses the next experiment." },
+    support: { stops: SUP_STOPS,  ticks: ["0 (prior)","0.25","0.5","0.75","1 (gauge)"],
+               note: "How much the 13 gauges constrain each cell: 1 minus posterior sd over prior sd. Grey cells carry no local evidence." }
+  };
+  function updateCbar() {
+    var c = CBAR[state.raster]; if (!c) return;
+    document.getElementById("cbar").style.background =
+      "linear-gradient(90deg," + c.stops.map(function (t) { return "rgb(" + t[1].map(Math.round).join(",") + ") " + (100*t[0]) + "%"; }).join(",") + ")";
+    var tk = document.getElementById("cbar-ticks").children;
+    for (var i = 0; i < tk.length; i++) tk[i].textContent = c.ticks[i] || "";
+    document.querySelector("#controls .note").textContent = c.note;
+  }
+  function setRaster(m) {
+    state.raster = m;
+    var btns = document.querySelectorAll("#modes button");
+    for (var i = 0; i < btns.length; i++) btns[i].classList.toggle("on", btns[i].getAttribute("data-m") === m);
+    if (m === "none") { if (map.hasLayer(overlay)) map.removeLayer(overlay); return; }
+    if (!map.hasLayer(overlay)) overlay.addTo(map);
+    updateCbar(); paintRaster();
+  }
+  Array.prototype.forEach.call(document.querySelectorAll("#modes button"), function (b) {
+    b.addEventListener("click", function () { setRaster(b.getAttribute("data-m")); });
+  });
+
+  /* ------------------------------------------------------------------ guided tour */
+  var yearTimer = null, animating = false;
+  function animYear(to, ms) {
+    clearInterval(yearTimer);
+    var from = +yearEl.value;
+    if (from === to) return;
+    var t0 = Date.now();
+    animating = true;                                  // hold the 3D redraw: Plotly.react every 60 ms would stutter
+    yearTimer = setInterval(function () {
+      var u = Math.min(1, (Date.now() - t0) / ms);
+      yearEl.value = Math.round(from + (to - from) * u); refresh();
+      if (u >= 1) { clearInterval(yearTimer); yearTimer = null; animating = false; refresh(); }
+    }, 60);
+  }
+  function setYear(y) { clearInterval(yearTimer); yearEl.value = y; refresh(); }
+  function setN(n) { nEl.value = String(n); refresh(); }
+  function stationIndex(name) { for (var i = 0; i < D.stations.length; i++) if (D.stations[i].Location === name) return i; return null; }
+
+  var STEPS = [
+    { t: "13 gauges, 34 years",
+      b: "Monthly sea level at <b>13 Pacific tide gauges, 1992–2025</b>. Every level is measured against that gauge's own benchmark — Fiji reads 2.37&nbsp;m and Marshall Islands 1.11&nbsp;m, and the difference is where somebody bolted a datum plate, not oceanography. So the comparable physical quantity is the <b>rise rate</b>.",
+      go: function () { setRaster("none"); closePanel(); map.flyToBounds(BOUNDS, { duration: 0.9 }); } },
+
+    { t: "The rise-rate field",
+      b: "Per gauge, <b>trend + annual cycle</b>: from 1.5&nbsp;mm/yr at Vanuatu to 9.8&nbsp;mm/yr at Samoa. Between the gauges the rate is carried by a <b>Matérn Gaussian process</b> fitted by type-II MAP. This surface <i>is</i> the R-INLA SPDE field — one object, written two ways.",
+      go: function () { setRaster("beta"); closePanel(); map.flyToBounds(BOUNDS, { duration: 0.9 }); } },
+
+    { t: "Where the model does not know",
+      b: "The posterior standard deviation of that same field. INLA's <code>int.strategy=\"eb\"</code> is type-II maximum likelihood — exactly what BoTorch's <code>fit_gpytorch_mll</code> performs — so this uncertainty map is <b>precisely what UCB, expected improvement and integrated-variance acquisitions consume</b>. A finished spatial analysis is already a Bayesian-optimisation surrogate.",
+      go: function () { setRaster("sd"); closePanel(); map.flyToBounds(BOUNDS, { duration: 0.9 }); } },
+
+    { t: "So where should the next gauge go?",
+      b: "Maximise the drop in integrated posterior variance and you get the <b>red marker</b>. Over 6 episodes of 15 experiments, BoTorch leaves <b>0.682</b> of the prior map variance where random leaves <b>0.815</b> — 32&nbsp;% of the uncertainty removed against 18&nbsp;%, with four times smaller spread. PPO at 40&nbsp;000 steps reached 0.957: reported, not hidden.",
+      go: function () { setRaster("sd"); map.flyTo([D.next_site.lat, D.next_site.lon360], 5, { duration: 1.1 }); openPanel(D.next_site.lon360, D.next_site.lat, null); } },
+
+    { t: "From rate to risk",
+      b: "A rate is the right target for the lab and the wrong number for a reader. So the map models <b>annual maxima</b> directly: de-trended to a year-2000 baseline, then one joint GEV over all 13 stations — <b>shared shape ξ = −0.024</b>, a location and a scale per station. The location is never interpolated: it carries the datum from step&nbsp;1.",
+      go: function () { setRaster("p"); setN(10); setYear(2020); var i = stationIndex("TUVALU"), st = D.stations[i];
+                        map.flyTo([st.lat, st.lon360], 5, { duration: 1.1 }); openPanel(st.lon360, st.lat, i); } },
+
+    { t: "One assertion keeps it honest",
+      b: "Watch the number in the panel. At <b>year 2000</b> the trend shift δ is zero, so the formula must return <b>exactly 1/N — 10.0&nbsp;% — at every one of the 19&nbsp;200 cells</b>, and the credible band must collapse onto it, because at δ&nbsp;=&nbsp;0 the answer no longer depends on the rate. The build fails if that ever stops holding — one assertion covering the GEV parameterisation, the baseline year and the algebra.",
+      go: function () { setRaster("p"); setN(10); setYear(2000); } },
+
+    { t: "The old 1-in-10 level, today and in 2035",
+      b: "Now let the year run forward to <b>2035</b>: same point, same baseline level, only the trend has moved. The <b>90&nbsp;% band</b> opens up as the uncertainty in the rate itself starts to matter — it comes from the GP posterior of β pushed through the same closed form. P is monotone in β, so no Monte Carlo is needed, which is why the slider responds instantly.",
+      go: function () { setRaster("p"); animYear(2035, 2200); } },
+
+    { t: "It saturates, and that is the result",
+      b: "Samoa rises 9.8&nbsp;mm/yr: half a metre over fifty years, against a GEV scale of <b>0.047&nbsp;m</b>. A shift of ten times the natural spread pins the probability at 1. <b>Sea-level rise overwhelming year-to-year variability is the finding</b> — and it means the informative part of the slider is roughly 2010–2040, or later years at longer return periods.",
+      go: function () { setRaster("p"); animYear(2060, 1600); } },
+
+    { t: "What this is not",
+      b: "<b>67&nbsp;% of cells have data support below 0.25</b>: there the posterior has reverted to the prior, and the map fades them rather than showing a confident number over empty ocean. And the project holds <b>no digital elevation model</b> — every probability is water passing a level that used to be rare <i>at a gauge's own datum</i>, never land under water.",
+      go: function () { setRaster("support"); closePanel(); map.flyToBounds(BOUNDS, { duration: 0.9 }); } }
+  ];
+
+  var tourEl = document.getElementById("tour"), tourIdx = -1;
+  var dots = document.getElementById("tour-dots");
+  STEPS.forEach(function () { dots.appendChild(document.createElement("i")); });
+
+  function tourGo(i) {
+    if (i < 0 || i >= STEPS.length) return;
+    tourIdx = i;
+    var st = STEPS[i];
+    document.getElementById("tour-n").textContent = "Step " + (i + 1) + " / " + STEPS.length;
+    document.getElementById("tour-t").textContent = st.t;
+    document.getElementById("tour-b").innerHTML = st.b;
+    for (var q = 0; q < dots.children.length; q++) dots.children[q].classList.toggle("on", q <= i);
+    document.getElementById("tour-prev").disabled = (i === 0);
+    document.getElementById("tour-next").textContent = (i === STEPS.length - 1) ? "Finish" : "Next";
+    document.getElementById("hint").classList.add("off");
+    try { st.go(); } catch (e) { if (window.console) console.error("tour step failed", i, e); }
+  }
+  function tourStart() { document.body.classList.add("tour-on"); tourEl.classList.add("on"); tourGo(0); }
+  function tourEnd() { document.body.classList.remove("tour-on"); tourEl.classList.remove("on"); tourIdx = -1; clearInterval(yearTimer); yearTimer = null; animating = false; }
+
+  document.getElementById("tour-start").addEventListener("click", tourStart);
+  document.getElementById("tour-x").addEventListener("click", tourEnd);
+  document.getElementById("tour-prev").addEventListener("click", function () { tourGo(tourIdx - 1); });
+  document.getElementById("tour-next").addEventListener("click", function () {
+    if (tourIdx === STEPS.length - 1) { tourEnd(); return; } tourGo(tourIdx + 1);
+  });
+  document.addEventListener("keydown", function (e) {
+    if (tourIdx < 0) { if (e.key === "t" || e.key === "T") tourStart(); return; }
+    if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") { e.preventDefault(); if (tourIdx === STEPS.length - 1) tourEnd(); else tourGo(tourIdx + 1); }
+    else if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); tourGo(tourIdx - 1); }
+    else if (e.key === "Escape") tourEnd();
+  });
+  if (/[?&]tour=1/.test(location.search)) setTimeout(tourStart, 400);
+
   /* ------------------------------------------------------------------ boot */
+  updateCbar();
   paintRaster();
   window.addEventListener("resize", function () { if (state.sel && window.Plotly) { Plotly.Plots.resize("plot3d"); } });
 })();
