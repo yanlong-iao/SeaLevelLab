@@ -62,7 +62,7 @@
 </style>
 </head>
 <body>
-<nav class="sl-nav" aria-label="Site"><a class="sl-brand" href="./">SeaLevelLab</a><div class="sl-links"><a href="./" class="on">Overview</a><a href="app.html">Interactive map</a><a href="report.html">Engineering report</a><a href="demo.html">Full analysis <span class="sl-tag">~10 MB, slow on mobile</span></a><a href="https://github.com/yanlong-iao/SeaLevelLab" target="_blank" rel="noopener">GitHub</a></div></nav>
+<nav class="sl-nav" aria-label="Site"><a class="sl-brand" href="./">SeaLevelLab</a><div class="sl-links"><a href="./" class="on">Overview</a><a href="walkthrough.html">Walkthrough</a><a href="app.html">Interactive map</a><a href="report.html">Engineering report</a><a href="demo.html">Full analysis <span class="sl-tag">~10 MB, slow on mobile</span></a><a href="https://github.com/yanlong-iao/SeaLevelLab" target="_blank" rel="noopener">GitHub</a></div></nav>
 <main>
   <section class="hero">
     <div class="eyebrow">Pacific sea level · self-driving-lab intelligence layer</div>
@@ -75,7 +75,7 @@
       <li><b>Risk view:</b> a non-stationary GEV on annual maxima gives the probability that each station's old 1-in-N level is exceeded in any future year.</li>
     </ul>
     <a class="cta" href="app.html">Open the interactive map <small>→</small></a>
-    <span class="sub">Works on phones. Click any point for a local 3D view.</span>
+    <span class="sub">Works on phones. Click any point for a local 3D view. New to the project? <a href="walkthrough.html">Read the seven-step walkthrough</a>.</span>
   </section>
 
   <figure>
@@ -85,7 +85,7 @@
 
   <div class="entries">
     <a class="entry" href="app.html"><b>Interactive map</b><span>Exceedance probability for any year and baseline; click for the local 3D surface and the nearest gauge's GEV fit.</span></a>
-    <a class="entry" href="report.html"><b>Engineering report</b><span>Math bridge from INLA to Gaussian-process surrogates, MDP design, agent workflow, benchmark, interview pitch.</span></a>
+    <a class="entry" href="walkthrough.html"><b>How it works</b><span>Seven steps: the data and its datum trap, the INLA SPDE fit, why that field is a BO surrogate, the belief-MDP, the benchmark, the GEV risk model, and the limits.</span></a><a class="entry" href="report.html"><b>Engineering report</b><span>Math bridge from INLA to Gaussian-process surrogates, MDP design, agent workflow, benchmark, interview pitch.</span></a>
     <a class="entry" href="demo.html"><b>Full analysis</b><span>The complete Quarto notebook: INLA fit, GP from scratch, twin, BO loop, animated belief map.</span><span class="warn">~10 MB, slow on mobile</span></a>
     <a class="entry" href="https://github.com/yanlong-iao/SeaLevelLab" target="_blank" rel="noopener"><b>Source on GitHub</b><span>R and Python code, tests, CI, and the build script behind this site.</span></a>
   </div>

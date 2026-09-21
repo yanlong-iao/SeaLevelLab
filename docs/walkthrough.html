@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Walkthrough · SeaLevelLab</title>
+<meta name="description" content="Step by step: the data, the R-INLA SPDE model, the bridge from SPDE to Gaussian-process surrogate, the digital twin and Gymnasium environment, the Bayesian-optimisation benchmark, the non-stationary GEV risk model, and what the method cannot do.">
+<meta property="og:title" content="SeaLevelLab — how it works, step by step">
+<meta property="og:description" content="Seven steps from 13 Pacific tide gauges to an interactive exceedance-probability map: INLA SPDE, the Matérn bridge, a belief-MDP, BoTorch vs PPO vs random, and a non-stationary GEV.">
+<meta property="og:image" content="https://yanlong-iao.github.io/SeaLevelLab/belief_map.png">
+<meta property="og:url" content="https://yanlong-iao.github.io/SeaLevelLab/walkthrough.html">
+<meta property="og:type" content="article">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="SeaLevelLab — how it works, step by step">
+<meta name="twitter:description" content="Seven steps from 13 Pacific tide gauges to an interactive exceedance-probability map.">
+<meta name="twitter:image" content="https://yanlong-iao.github.io/SeaLevelLab/belief_map.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%230e6f82'/%3E%3Cpath d='M10 36c6-8 12-8 18 0s12 8 18 0 6-8 8-6' fill='none' stroke='%23fff' stroke-width='5' stroke-linecap='round'/%3E%3Cpath d='M10 46c6-8 12-8 18 0s12 8 18 0' fill='none' stroke='%23bfe3ea' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+  :root { --ink:#1b2a33; --muted:#5a6b78; --line:#d5dde3; --tide:#0e6f82; --tide-soft:#e6f2f5; --coral:#d2573a; --bg:#f3f6f8; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif; font-size:16px; line-height:1.55; }
+.sl-nav{position:sticky;top:0;z-index:2000;display:flex;align-items:center;gap:14px;height:44px;padding:0 14px;background:#fff;border-bottom:1px solid #d5dde3;font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;font-size:13.5px;box-sizing:border-box}
+.sl-brand{font-weight:700;color:#0e6f82;text-decoration:none;letter-spacing:.01em;white-space:nowrap}
+.sl-links{display:flex;gap:2px;overflow-x:auto;white-space:nowrap;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.sl-links::-webkit-scrollbar{display:none}
+.sl-links a{color:#5a6b78;text-decoration:none;padding:6px 10px;border-radius:4px;display:inline-flex;align-items:center;gap:6px}
+.sl-links a:hover{background:#eef3f6;color:#1b2a33}
+.sl-links a.on{color:#0e6f82;font-weight:600;background:#e6f2f5}
+.sl-tag{font-size:10.5px;color:#8a2f18;background:#fbe6df;border-radius:3px;padding:1px 5px;font-weight:500}
+  main { max-width:900px; margin:0 auto; padding:28px 18px 70px; }
+  .eyebrow { font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--tide); font-weight:600; margin-bottom:10px; }
+  h1 { font-size:clamp(1.55rem,3.4vw,2.15rem); line-height:1.15; margin:0 0 12px; letter-spacing:-.01em; }
+  .lede { font-size:1.05rem; color:var(--muted); max-width:64ch; margin:0 0 18px; }
+  .toc { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 28px; }
+  .toc a { font-size:.85rem; text-decoration:none; color:var(--tide); background:#fff; border:1px solid var(--line); border-radius:20px; padding:5px 13px; }
+  .toc a:hover { border-color:var(--tide); background:var(--tide-soft); }
+  .step { background:#fff; border:1px solid var(--line); border-radius:8px; padding:24px 26px; margin:0 0 18px; scroll-margin-top:56px; }
+  .step > .k { display:flex; align-items:baseline; gap:12px; margin:0 0 4px; }
+  .step .num { flex:none; width:30px; height:30px; border-radius:50%; background:var(--tide); color:#fff; font-weight:700; font-size:.92rem; display:flex; align-items:center; justify-content:center; }
+  .step h2 { font-size:1.18rem; margin:0; letter-spacing:-.01em; }
+  .step .why { color:var(--tide); font-size:.87rem; font-weight:600; margin:2px 0 12px 42px; }
+  .step p, .step ul { max-width:68ch; }
+  .step p { margin:0 0 11px; }
+  .step ul { margin:0 0 11px; padding-left:1.15em; }
+  .step li { margin:5px 0; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.88em; background:#eef3f6; border-radius:3px; padding:1px 5px; }
+  .eq { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.86rem; background:#f7fafb; border:1px solid var(--line); border-left:3px solid var(--tide); border-radius:0 5px 5px 0; padding:12px 15px; margin:12px 0; overflow-x:auto; line-height:1.7; color:#23414c; }
+  .eq b { color:var(--tide); font-weight:600; }
+  table { border-collapse:collapse; width:100%; font-size:.88rem; margin:12px 0; }
+  th, td { border-bottom:1px solid var(--line); padding:6px 9px; text-align:left; }
+  th { color:var(--muted); font-weight:600; font-size:.8rem; text-transform:uppercase; letter-spacing:.04em; }
+  td.n, th.n { text-align:right; font-variant-numeric:tabular-nums; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  tr.hi td { background:#fdf4f1; }
+  .best { color:var(--tide); font-weight:700; }
+  .flag { background:#fdf4f1; border-left:3px solid var(--coral); border-radius:0 5px 5px 0; padding:11px 15px; margin:13px 0; font-size:.92rem; color:#5c3226; max-width:68ch; }
+  .flag b { color:#8a2f18; }
+  .note { background:var(--tide-soft); border-radius:5px; padding:11px 15px; margin:13px 0; font-size:.92rem; max-width:68ch; }
+  .try { display:inline-flex; align-items:center; gap:8px; background:var(--tide); color:#fff; text-decoration:none; font-weight:600; padding:10px 18px; border-radius:6px; font-size:.95rem; margin-top:6px; }
+  .try:hover { background:#0b5a6a; }
+  figure { margin:16px 0; }
+  figure img { width:100%; height:auto; display:block; border-radius:5px; border:1px solid var(--line); }
+  figcaption { font-size:.87rem; color:var(--muted); margin-top:9px; line-height:1.45; max-width:68ch; }
+  .pipe { width:100%; height:auto; margin:6px 0 4px; }
+  .refs { font-size:.85rem; color:var(--muted); }
+  .refs a { color:var(--tide); }
+  footer { color:var(--muted); font-size:.85rem; margin-top:26px; }
+  footer a { color:var(--tide); }
+  @media (max-width:700px){ .step { padding:20px 17px; } .step .why { margin-left:0; } }
+</style>
+</head>
+<body>
+<nav class="sl-nav" aria-label="Site"><a class="sl-brand" href="./">SeaLevelLab</a><div class="sl-links"><a href="./">Overview</a><a href="walkthrough.html" class="on">Walkthrough</a><a href="app.html">Interactive map</a><a href="report.html">Engineering report</a><a href="demo.html">Full analysis <span class="sl-tag">~10 MB, slow on mobile</span></a><a href="https://github.com/yanlong-iao/SeaLevelLab" target="_blank" rel="noopener">GitHub</a></div></nav>
+<main>
+<div class="eyebrow">Walkthrough · seven steps</div>
+<h1>From 13 tide gauges to a clickable probability map</h1>
+<p class="lede">What the data is, which models do the work, why a spatial statistics model and a Bayesian-optimisation surrogate turn out to be the same object, and what the result cannot tell you.</p>
+<div class="toc">
+<a href="#s1">1 · The data and its trap</a>
+<a href="#s2">2 · R-INLA SPDE</a>
+<a href="#s3">3 · The bridge</a>
+<a href="#s4">4 · Twin &amp; environment</a>
+<a href="#s5">5 · Closing the loop</a>
+<a href="#s6">6 · The risk model</a>
+<a href="#s7">7 · What it cannot do</a>
+</div>
+<section class="step" id="s0">
+  <div class="k"><div class="num">0</div><h2>The pipeline in one picture</h2></div>
+  <svg class="pipe" viewBox="0 0 900 132" role="img" aria-label="Pipeline: tide gauges to INLA SPDE field, to a Matern Gaussian process, splitting into a digital twin with a Gymnasium environment driving BoTorch, PPO and an LLM agent, and into a non-stationary GEV feeding the interactive map">
+    <defs><marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0 0l7 3.2L0 6.4z" fill="#8aa2ae"/></marker>
+    <style>.b{fill:#fff;stroke:#0e6f82;stroke-width:1.4;rx:6}.g{fill:#e6f2f5;stroke:#0e6f82;stroke-width:1.4;rx:6}.t{font:600 11.5px -apple-system,Segoe UI,Helvetica,Arial;fill:#1b2a33}.s{font:10px -apple-system,Segoe UI,Helvetica,Arial;fill:#5a6b78}.l{stroke:#8aa2ae;stroke-width:1.4;fill:none;marker-end:url(#a)}</style></defs>
+    <rect class="b" x="2" y="46" width="112" height="40"/><text class="t" x="17" y="63">13 gauges</text><text class="s" x="17" y="77">1992–2025</text>
+    <line class="l" x1="116" y1="66" x2="146" y2="66"/>
+    <rect class="b" x="150" y="46" width="116" height="40"/><text class="t" x="164" y="63">R-INLA SPDE</text><text class="s" x="164" y="77">Matérn, α = 2</text>
+    <line class="l" x1="268" y1="66" x2="298" y2="66"/>
+    <rect class="g" x="302" y="46" width="124" height="40"/><text class="t" x="316" y="63">Matérn GP</text><text class="s" x="316" y="77">the bridge</text>
+    <path class="l" d="M428 60 L446 60 L446 24 L474 24"/>
+    <path class="l" d="M428 74 L446 74 L446 110 L474 110"/>
+    <rect class="b" x="478" y="4" width="150" height="40"/><text class="t" x="492" y="21">Digital twin + env</text><text class="s" x="492" y="35">belief-MDP, Gymnasium</text>
+    <line class="l" x1="630" y1="24" x2="660" y2="24"/>
+    <rect class="b" x="664" y="4" width="232" height="40"/><text class="t" x="678" y="21">BoTorch · PPO · Optuna · LLM agent</text><text class="s" x="678" y="35">where to measure next</text>
+    <rect class="b" x="478" y="90" width="150" height="40"/><text class="t" x="492" y="107">Non-stationary GEV</text><text class="s" x="492" y="121">annual maxima</text>
+    <line class="l" x1="630" y1="110" x2="660" y2="110"/>
+    <rect class="g" x="664" y="90" width="232" height="40"/><text class="t" x="678" y="107">Interactive map</text><text class="s" x="678" y="121">click any point → local 3D surface</text>
+  </svg>
+  <p style="margin-top:14px">The left half is a classical spatial-statistics analysis. The right half is what that analysis becomes once you notice that its latent field and a Bayesian-optimisation surrogate are the same mathematical object. Steps&nbsp;1–3 build the left half, steps&nbsp;4–5 the top right, step&nbsp;6 the bottom right.</p>
+</section>
+
+<section class="step" id="s1">
+  <div class="k"><div class="num">1</div><h2>The data, and the trap inside it</h2></div>
+  <p class="why">Why first: the trap decides which quantity the whole project is allowed to model.</p>
+  <p>Monthly sea-level statistics from the Australian Bureau of Meteorology's Pacific Sea Level and Geodetic Monitoring Project: <b>13 tide gauges</b>, monthly records from <b>1992 to 2025</b>, 4&nbsp;576 station-months after cleaning. Each row carries the month's mean, standard deviation, minimum and maximum.</p>
+  <p>The trap is that every level is measured against <em>that gauge's own benchmark</em>. Fiji reads 2.37&nbsp;m and Marshall Islands reads 1.11&nbsp;m, and the difference is where somebody bolted a datum plate, not oceanography. Modelling raw levels across stations would fit that bolt.</p>
+  <p>So the comparable physical quantity is the <b>rise rate</b>: per station, fit <code>Mean ~ trend + annual cycle</code> and keep the trend in mm per year. Across the network it runs from <b>1.5&nbsp;mm/yr at Vanuatu to 9.8&nbsp;mm/yr at Samoa</b> — Samoa is high because of post-2009 earthquake subsidence, which is land moving down rather than water moving up, and the model is not asked to distinguish the two.</p>
+  <div class="flag"><b>What a reviewer notices.</b> With only 13 distinct locations, a spatial field is close to a 13-level random effect. The data cleaning also had to remove a <code>Year = 239890</code> row, string-typed numerics, and duplicated station-months. These seams are stated, not smoothed over.</div>
+</section>
+
+<section class="step" id="s2">
+  <div class="k"><div class="num">2</div><h2>The classical model: an R-INLA SPDE field</h2></div>
+  <p class="why">Why: it produces the uncertainty map that every later decision reads.</p>
+  <p>Monthly mean sea level is fitted with a latent Gaussian field using the stochastic partial differential equation approach in R-INLA: a triangulated mesh over the study box, a Matérn field with <code>alpha = 2</code> (smoothness ν&nbsp;=&nbsp;1 in two dimensions), a Gaussian likelihood, and the month's standard deviation as a covariate. Inference uses <code>int.strategy = "eb"</code>, empirical Bayes.</p>
+  <p>The field is then projected onto a regular grid, which turns a mesh of triangles into two surfaces you can actually read: the <b>posterior mean</b> and the <b>posterior standard deviation</b>. The second one matters more than the first. It says where the model does not know, and every acquisition function in step&nbsp;5 is a different way of asking that same map a question.</p>
+</section>
+
+<section class="step" id="s3">
+  <div class="k"><div class="num">3</div><h2>The bridge: the SPDE field <em>is</em> a Bayesian-optimisation surrogate</h2></div>
+  <p class="why">Why this is the centre of the project: it is what lets a classical analysis become a decision loop without inventing a second model.</p>
+  <p>Lindgren, Rue &amp; Lindström (2011) showed that the SPDE <code>(κ² − Δ)^(α/2)(τu) = W</code> has a Gaussian-process solution with a Matérn covariance and practical range <code>ρ = √(8ν)/κ</code>. Three correspondences follow, and all three are visible in the code rather than asserted in prose:</p>
+  <ul>
+    <li><code>alpha = 2</code> in R-INLA is a Matérn kernel with ν&nbsp;=&nbsp;1 — the same kernel family BoTorch puts inside a surrogate.</li>
+    <li>INLA's <code>int.strategy = "eb"</code> is type-II maximum likelihood, which is exactly what <code>fit_gpytorch_mll</code> performs.</li>
+    <li>The posterior-sd map that the classical analysis plots is the quantity that UCB, expected improvement and integrated-variance acquisitions consume.</li>
+  </ul>
+  <p>To make the equivalence checkable, the Gaussian process is also written from scratch in about forty lines of R — Matérn 3/2 covariance, Cholesky solve, log marginal likelihood, type-II MAP fit — and its fitted range and scale are printed side by side with INLA's.</p>
+  <div class="flag"><b>Where a statistics background earns its keep.</b> With 13 sites the Matérn range and the nugget are only <em>jointly</em> identifiable (Zhang, 2004). Plain maximum likelihood collapsed the surrogate to a 0.3° range with zero observation noise — a model that believes it has already measured everything. Log-normal priors on the lengthscale and the noise, which is type-II MAP and the analogue of INLA's penalised-complexity priors, fix it. An ML default would have shipped the broken version silently.</div>
+</section>
+
+<section class="step" id="s4">
+  <div class="k"><div class="num">4</div><h2>The digital twin and a Gymnasium environment</h2></div>
+  <p class="why">Why: a self-driving lab needs a simulator before it is allowed near hardware.</p>
+  <p>A tide-gauge network is a laboratory whose experiments are expensive — deploying a gauge, or running a survey campaign at a location. The <b>twin</b> draws a hidden truth from the GP posterior, so it honours all 13 real gauges but has unknown structure between them. The <b>environment</b> follows the Gymnasium contract, <code>reset()</code> and <code>step(action)</code>, and exists in both R (an R6 class) and Python.</p>
+  <table>
+    <tr><th>MDP element</th><th>Definition</th></tr>
+    <tr><td>hidden state</td><td>the true rise-rate field, mm/yr</td></tr>
+    <tr><td>state (belief)</td><td>GP posterior mean and sd on the grid, plus budget left — a sufficient statistic of the history, which turns the POMDP into a belief-MDP</td></tr>
+    <tr><td>action</td><td>a location in the study box: where to run the next experiment</td></tr>
+    <tr><td>reward, active learning</td><td>integrated posterior variance removed, normalised — the A-optimal design criterion, minus a cost per experiment</td></tr>
+    <tr><td>reward, optimisation</td><td>improvement of the best measured rate, in units of the field scale</td></tr>
+    <tr><td>transition</td><td>run the experiment, then Bayes' rule on the GP</td></tr>
+  </table>
+  <p>Only one function in the whole stack touches the instrument: <code>measure(x)</code>. Everything else — acquisitions, policies, the language model in step&nbsp;5 — reaches the hardware through <code>env.step()</code> and nowhere else.</p>
+</section>
+
+<section class="step" id="s5">
+  <div class="k"><div class="num">5</div><h2>Closing the loop, and what the benchmark actually says</h2></div>
+  <p class="why">Why: this is the part that is easy to fake and easy to check.</p>
+  <p>Each iteration is: current belief → acquisition over the candidate grid → argmax → <code>step()</code> → Bayesian update. For active learning the acquisition is the closed-form drop in integrated posterior variance from adding one point; for optimisation it is noisy expected improvement. Every agent sees the same hidden truths and the same measurement noise, with a budget of 15 experiments over 6 episodes.</p>
+  <p><b>Active learning</b> — fraction of the prior map variance still remaining after 15 experiments, lower is better:</p>
+  <table>
+    <tr><th>agent</th><th class="n">IPV remaining</th><th class="n">best measured, mm/yr</th></tr>
+    <tr><td>Random</td><td class="n">0.815 ± 0.045</td><td class="n">6.84</td></tr>
+    <tr><td>SB3-PPO</td><td class="n">0.957 ± 0.000</td><td class="n">5.64</td></tr>
+    <tr><td><span class="best">BoTorch</span></td><td class="n"><span class="best">0.682 ± 0.002</span></td><td class="n">8.18</td></tr>
+  </table>
+  <p><b>Optimisation</b> — simple regret against the twin's true maximum, mm/yr, lower is better:</p>
+  <table>
+    <tr><th>agent</th><th class="n">simple regret</th><th class="n">best measured, mm/yr</th></tr>
+    <tr><td>Random</td><td class="n">2.456 ± 1.741</td><td class="n">6.84</td></tr>
+    <tr><td>Optuna-GP</td><td class="n">2.294 ± 0.620</td><td class="n">7.01</td></tr>
+    <tr><td>SB3-PPO</td><td class="n">3.984 ± 0.438</td><td class="n">5.93</td></tr>
+    <tr><td><span class="best">BoTorch</span></td><td class="n"><span class="best">1.719 ± 0.483</span></td><td class="n">7.32</td></tr>
+  </table>
+  <p>The closed loop removes <b>32&nbsp;%</b> of the map uncertainty where random experimentation removes <b>18&nbsp;%</b>, and its spread across hidden truths is four times smaller — the consistency matters more than the mean when each experiment is a field campaign.</p>
+  <div class="flag"><b>The negative result is reported, not hidden.</b> PPO at 40&nbsp;000 steps did not learn a competitive policy: 0.957 IPV remaining is barely better than doing nothing. That is the standard finding for small-budget experimental design, where a policy has to be amortised across many hidden truths before it beats an acquisition function computed fresh each step. Cold-start hot-spot search with 15 noisy experiments is genuinely hard, and the optimisation regrets overlap within their error bars.</div>
+  <p>On top of the loop sits an <b>agentic layer</b>: a language model reads compact JSON statistics of the belief and calls the lab through an audited toolbox — <code>describe_lab</code>, <code>run_experiment</code>, <code>run_bo_campaign</code>, <code>surrogate_hyperparameters</code>, <code>final_report</code> — in a ReAct loop. Its stopping rule is information gain per experiment, not a fixed schedule. It runs offline against a mock and live against any OpenAI-compatible endpoint.</p>
+  <figure>
+    <img src="belief_map.png" alt="Three maps: the hidden truth, the posterior mean after 15 experiments, and the posterior standard deviation" width="1950" height="540">
+    <figcaption>One active-learning episode. Left: the hidden truth the twin generated. Middle: the belief after 15 chosen experiments. Right: the posterior sd — the quantity every acquisition integrates. Triangles are the 13 real gauges; numbered red points are the experiments the loop chose. Notice it spends its budget in the gaps, not on top of existing gauges.</figcaption>
+  </figure>
+</section>
+
+<section class="step" id="s6">
+  <div class="k"><div class="num">6</div><h2>The risk model behind the map</h2></div>
+  <p class="why">Why separate from step 5: the loop optimises <em>where to learn</em>; this is the quantity a person actually wants to read off a map.</p>
+  <p>Rise rate is the right target for the lab but the wrong number for a reader. What a reader wants is: <em>how often does the old extreme happen now?</em> So the map models annual extremes directly.</p>
+  <ul>
+    <li>Per station, take the <b>annual maximum</b> of the recorded monthly maximum, de-trended to a year-2000 baseline using that station's own rise rate.</li>
+    <li>Fit a <b>generalised extreme value distribution</b> to all 13 stations jointly by maximum likelihood — 27 parameters: one shape shared across the network, plus a location and a scale per station. Sharing the shape is the statistically honest move with roughly 32 annual maxima per station. The fitted shape is <b>ξ = −0.024</b>, essentially Gumbel, which is what bounded tidal extremes should look like.</li>
+    <li>The station location parameter is <em>never</em> interpolated across space: it carries the datum offset from step&nbsp;1. Only the rise rate β(x) and the log GEV scale are carried across the map, by the same Gaussian process from step&nbsp;3.</li>
+  </ul>
+  <p>The probability that a given year's maximum exceeds the level that had a 1-in-N chance around 2000 then has a closed form, with the trend entering as a dimensionless shift δ:</p>
+  <div class="eq">z<sub>N</sub> = ((−log(1 − 1/N))<sup>−ξ</sup> − 1) / ξ<br>
+δ(x, Y) = <b>β(x)</b> · (Y − 2000) / <b>σ(x)</b>&nbsp;&nbsp;&nbsp;← the trend measured in units of natural variability<br>
+P = 1 − exp( −[1 + ξ·(z<sub>N</sub> − δ)]<sup>−1/ξ</sup> )</div>
+  <p>Because P is monotone in β, the 90&nbsp;% credible band comes from putting the 5&nbsp;% and 95&nbsp;% quantiles of the GP posterior for β through the same formula — no Monte Carlo, which is why the year slider can recompute the whole map in the browser without lag.</p>
+  <div class="note"><b>The self-check that keeps this honest.</b> Set Y&nbsp;=&nbsp;2000 and N&nbsp;=&nbsp;10. Then δ&nbsp;=&nbsp;0 and the formula must return exactly 0.100 at every one of the 19&nbsp;200 grid cells. It does, to within 0.01, and the build fails if it ever stops doing so. One assertion catches an error in the GEV parameterisation, the baseline year, or the algebra.</div>
+  <p>Per station, with each gauge's own fitted rate and scale, probability that the old 1-in-10-year level is exceeded:</p>
+  <table>
+    <tr><th>station</th><th class="n">β, mm/yr</th><th class="n">GEV scale σ, m</th><th class="n">P in 2020</th><th class="n">P in 2035</th><th class="n">P in 2050</th></tr>
+<tr><td>SAMOA</td><td class='n'>9.81</td><td class='n'>0.047</td><td class='n'>1.00</td><td class='n'>1.00</td><td class='n'>1.00</td></tr>
+<tr><td>TONGA</td><td class='n'>7.23</td><td class='n'>0.084</td><td class='n'>0.46</td><td class='n'>0.89</td><td class='n'>1.00</td></tr>
+<tr><td>Federated States of Micronesia</td><td class='n'>6.05</td><td class='n'>0.120</td><td class='n'>0.26</td><td class='n'>0.48</td><td class='n'>0.75</td></tr>
+<tr><td>Papua New Guinea</td><td class='n'>5.73</td><td class='n'>0.084</td><td class='n'>0.35</td><td class='n'>0.70</td><td class='n'>0.96</td></tr>
+<tr><td>Solomon Islands</td><td class='n'>5.65</td><td class='n'>0.081</td><td class='n'>0.36</td><td class='n'>0.72</td><td class='n'>0.97</td></tr>
+<tr><td>NIUE</td><td class='n'>5.60</td><td class='n'>0.107</td><td class='n'>0.27</td><td class='n'>0.50</td><td class='n'>0.78</td></tr>
+<tr><td>NAURU</td><td class='n'>5.12</td><td class='n'>0.087</td><td class='n'>0.30</td><td class='n'>0.58</td><td class='n'>0.88</td></tr>
+<tr><td>TUVALU</td><td class='n'>4.44</td><td class='n'>0.068</td><td class='n'>0.34</td><td class='n'>0.67</td><td class='n'>0.95</td></tr>
+<tr><td>Cook Islands</td><td class='n'>4.22</td><td class='n'>0.039</td><td class='n'>0.62</td><td class='n'>0.99</td><td class='n'>1.00</td></tr>
+<tr><td>Marshall Islands</td><td class='n'>4.16</td><td class='n'>0.043</td><td class='n'>0.53</td><td class='n'>0.96</td><td class='n'>1.00</td></tr>
+<tr><td>FIJI</td><td class='n'>4.02</td><td class='n'>0.065</td><td class='n'>0.32</td><td class='n'>0.62</td><td class='n'>0.91</td></tr>
+<tr><td>KIRIBATI</td><td class='n'>3.52</td><td class='n'>0.061</td><td class='n'>0.30</td><td class='n'>0.57</td><td class='n'>0.87</td></tr>
+<tr><td>VANUATU</td><td class='n'>1.55</td><td class='n'>0.052</td><td class='n'>0.18</td><td class='n'>0.27</td><td class='n'>0.38</td></tr>
+  </table>
+  <a class="try" href="app.html">Open the map and click a point →</a>
+</section>
+
+<section class="step" id="s7">
+  <div class="k"><div class="num">7</div><h2>What this cannot tell you</h2></div>
+  <p class="why">Why it is on the site rather than in a footnote: every one of these would otherwise be someone's first question.</p>
+  <ul>
+    <li><b>It is not a flood map.</b> The project holds no digital elevation model and no absolute elevations. Every probability is relative to a gauge's own datum: the chance that the water passes a level that used to be rare <em>there</em>, not that any particular land is under it.</li>
+    <li><b>The probabilities saturate, and that is the finding.</b> Samoa's 9.8&nbsp;mm/yr over fifty years is about 0.49&nbsp;m, against a GEV scale of 0.047&nbsp;m — a shift of roughly ten times the natural spread, so P goes to 1 and stays there. Sea-level rise overwhelming year-to-year variability is the physical result; it also means the informative part of the slider is roughly 2010–2040, or later years at longer return periods.</li>
+    <li><b>Most of the map is prior, not data.</b> 67&nbsp;% of grid cells have a data-support score below 0.25, meaning the GP posterior there has largely reverted to the prior. The map fades those cells and the click panel says so rather than showing a confident number over empty ocean.</li>
+    <li><b>The trend is extrapolated linearly.</b> No acceleration term, no scenario forcing. A linear trend fitted to 1992–2025 is pushed forward; that is a modelling choice, not a projection of climate policy.</li>
+    <li><b>Samoa's rate is partly land, not water.</b> Post-2009 earthquake subsidence lowers the benchmark, and a tide gauge cannot separate that from rising water without independent geodesy.</li>
+  </ul>
+</section>
+
+<section class="step">
+  <div class="k"><div class="num">→</div><h2>Where to look next</h2></div>
+  <p><a href="app.html">The interactive map</a> is the result. <a href="report.html">The engineering report</a> has the five-phase write-up: math bridge, MDP design, agentic workflow, benchmark, pitch. <a href="demo.html">The full analysis</a> is the Quarto notebook with the INLA fit, the from-scratch GP, the twin and the animated belief map. <a href="https://github.com/yanlong-iao/SeaLevelLab">The repository</a> carries the R and Python code, the smoke tests and the CI.</p>
+  <p class="refs">Lindgren, Rue &amp; Lindström (2011), <em>JRSS-B</em> · Zhang (2004), <em>JASA</em> · Balandat et al. (2020), <em>NeurIPS</em> · Letham et al. (2019), <em>Bayesian Analysis</em> · Yao et al. (2023), <em>ICLR</em>.</p>
+</section>
+
+<footer>SeaLevelLab · MIT licence · <a href="https://github.com/yanlong-iao/SeaLevelLab">github.com/yanlong-iao/SeaLevelLab</a></footer>
+</main>
+</body>
+</html>
