@@ -75,7 +75,7 @@
    "transform": "Check columns, units, timestamps and value range; drop fill values; upsert by (station, hour); export the last 30 days as anomalies from their own mean",
    "stored": "SQLite table observations -> docs/live/live_data.json",
    "used_by": "Map app: Live data tab; home page status badge; this page",
-   "failure": "30 s timeout, 3 retries with exponential back-off, no retry on 4xx; each gauge fetched independently; if a gauge fails its previous export is kept and labelled stale",
+   "failure": "30 s timeout and a 60 s cap per response, 3 retries with exponential back-off, no retry on 4xx; each gauge fetched independently; 8-minute run budget; a gauge that fails or is not reached keeps its previous export, labelled stale",
    "code": [
     {
      "path": "etl/live_sealevel.py",
@@ -96,6 +96,11 @@
      "path": "etl/station_map.json",
      "symbol": "uhslc_id",
      "note": "13 gauges mapped, with basis and confidence"
+    },
+    {
+     "path": "etl/live_sealevel.py",
+     "symbol": "RUN_BUDGET_S",
+     "note": "run time budget"
     }
    ],
    "notes": "ERDDAP sends no CORS header, so a browser cannot call it directly. That is why this source has to go through a server-side job."
@@ -329,7 +334,7 @@
  "reliability": [
   {
    "t": "Timeouts and retries",
-   "d": "Every server-side call has a 30 s timeout and up to 3 retries with exponential back-off; client errors (4xx) are not retried. The browser call has an 8 s timeout."
+   "d": "Every server-side call has a 30 s timeout, a hard 60 s cap on the whole response, and up to 3 retries with exponential back-off; client errors (4xx) are not retried. The whole run has an 8-minute budget: gauges not reached keep their last good data. The browser call has an 8 s timeout."
   },
   {
    "t": "Validate before storing",
