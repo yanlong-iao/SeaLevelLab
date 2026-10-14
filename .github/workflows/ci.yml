@@ -38,7 +38,7 @@ jobs:
       - name: Live-data ETL tests (offline, standard library only)
         run: |
           pip install pytest
-          pytest -q etl/tests
+          python -m pytest -q etl/tests
 
   site-js:
     runs-on: ubuntu-latest

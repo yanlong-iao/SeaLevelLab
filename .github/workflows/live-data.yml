@@ -28,7 +28,7 @@ jobs:
       - name: Unit tests (parsing, schema, upsert, failure policy)
         run: |
           pip install pytest
-          pytest -q etl/tests
+          python -m pytest -q etl/tests
 
       # The database is the ETL's working store; it persists between runs in the Actions cache.
       # If the cache is evicted, the next run rebuilds from the APIs and the site keeps the last good export meanwhile.
