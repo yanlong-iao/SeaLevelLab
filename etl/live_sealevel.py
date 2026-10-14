@@ -51,6 +51,7 @@ OBS_WINDOW_DAYS = 30          # what the site shows
 OBS_FETCH_DAYS = 75           # what we ask for: the fast-delivery lag is ~4-6 weeks, so 30 days back from today is often empty
 FORECAST_DAYS = 7
 HISTORY_KEEP = 30             # run-history entries kept in status.json
+RUN_BUDGET_S = 480            # stop starting new requests after 8 min; the rest keep their last good export
 USER_AGENT = "SeaLevelLab-ETL/1.0 (+https://github.com/yanlong-iao/SeaLevelLab)"
 
 
@@ -66,8 +67,17 @@ def http_get_json(url: str, *, timeout: float = 30.0, retries: int = 3, backoff:
     for attempt in range(retries + 1):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+            deadline = time.monotonic() + 2 * timeout          # socket timeout covers each read; this caps the whole response
             with opener(req, timeout=timeout) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+                chunks = []
+                while True:
+                    b = resp.read(65536)
+                    if not b:
+                        break
+                    chunks.append(b)
+                    if time.monotonic() > deadline:
+                        raise TimeoutError(f"response still streaming after {2 * timeout:.0f} s")
+                return json.loads(b"".join(chunks).decode("utf-8"))
         except urllib.error.HTTPError as e:
             last = e
             if e.code < 500 and e.code != 429:
@@ -310,9 +320,9 @@ def load_stations() -> list[dict]:
 
 
 def run(*, fetch: bool = True, db_path: Path | str = DB_PATH, export_dir: Path = EXPORT_DIR, get=http_get_json,
-        now: datetime | None = None, log=print) -> dict:
+        now: datetime | None = None, log=print, budget_s: float = RUN_BUDGET_S, clock=time.monotonic) -> dict:
     now = now or datetime.now(timezone.utc)
-    t_start = time.monotonic()
+    t_start = clock()
     stations = load_stations()
     con = connect(db_path)
     upsert_stations(con, stations)
@@ -321,6 +331,10 @@ def run(*, fetch: bool = True, db_path: Path | str = DB_PATH, export_dir: Path =
         retrieved = iso(now)
         issued = now.strftime("%Y-%m-%dT%H:00Z")
         for s in stations:
+            if clock() - t_start > budget_s:
+                errors.append(f"time budget of {budget_s:.0f} s used up before {s['location']}; kept its last good data")
+                log(f"  budget used up, skipping {s['uhslc_name']}")
+                continue
             got = 0
             try:
                 n = upsert_observations(con, s["uhslc_id"], parse_uhslc(get(uhslc_url(s["uhslc_id"], now - timedelta(days=OBS_FETCH_DAYS)))), retrieved)
@@ -339,7 +353,7 @@ def run(*, fetch: bool = True, db_path: Path | str = DB_PATH, export_dir: Path =
             ok += got == 2
             con.commit()
     status = "ok" if not errors else ("partial" if ok or obs_rows or fc_rows else "failed")
-    duration = round(time.monotonic() - t_start, 2)
+    duration = round(clock() - t_start, 2)
     con.execute("INSERT INTO etl_runs (started, duration_s, status, obs_rows, fc_rows, stations_ok, stations_total, errors) VALUES (?,?,?,?,?,?,?,?)",
                 (iso(now), duration, status if fetch else "export-only", obs_rows, fc_rows, ok, len(stations), json.dumps(errors)))
     con.commit()

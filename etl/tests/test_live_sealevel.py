@@ -139,12 +139,24 @@ def test_total_failure_exits_nonzero_but_keeps_files(tmp_path, monkeypatch):
     assert json.loads((tmp_path / "live_data.json").read_text())["stations"][0]["obs"]["n"] == json.loads(before)["stations"][0]["obs"]["n"]
 
 
+def test_time_budget_skips_remaining_stations(tmp_path):
+    L.run(db_path=tmp_path / "a.sqlite", export_dir=tmp_path, get=fake_get(), now=NOW, log=lambda *_: None)
+    ticks = iter(range(0, 10_000, 100))                       # every clock() call advances 100 s
+    st = L.run(db_path=tmp_path / "b.sqlite", export_dir=tmp_path, get=fake_get(), now=NOW, log=lambda *_: None,
+               budget_s=250, clock=lambda: next(ticks))
+    assert st["last_run"]["status"] == "partial" and 0 < st["last_run"]["stations_ok"] < 13
+    assert any("budget" in e for e in st["last_run"]["errors"])
+    doc = json.loads((tmp_path / "live_data.json").read_text())
+    assert all(s["obs"] for s in doc["stations"])                               # skipped stations keep their data
+
+
 def test_http_retries_then_succeeds(monkeypatch):
     calls = {"n": 0}
     class Resp:
         def __enter__(self): return self
         def __exit__(self, *a): return False
-        def read(self): return b'{"ok": 1}'
+        def __init__(self): self.parts = [b'{"ok": ', b'1}']
+        def read(self, n=-1): return self.parts.pop(0) if self.parts else b""
     def opener(req, timeout):
         calls["n"] += 1
         if calls["n"] < 3:

@@ -41,7 +41,7 @@ jobs:
 
       - name: Fetch, validate, upsert, export
         id: etl
-        run: python -m etl.live_sealevel
+        run: python -u -m etl.live_sealevel
 
       - name: Save database
         if: always()
