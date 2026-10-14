@@ -50,3 +50,8 @@ APP_TASK_BRIEF.md
 
 # scratch files from the walkthrough page build
 docs/_*.html
+data/live/
+.claude/
+
+# interview notes (local only)
+INTERVIEW_*.md

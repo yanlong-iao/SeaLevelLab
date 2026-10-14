@@ -1,0 +1,19 @@
+{
+  "_about": "Each of the 13 gauges in Processed_Final_data.csv mapped to a station in the UHSLC Fast Delivery dataset (ERDDAP global_hourly_fast). The BoM monthly files only name the country, and the dataset's coordinates are country-level approximations, so matching is by country plus the known monitoring site, not by distance. 'basis' says how each match was made. Gauge coordinates below are UHSLC's and are also used for the Open-Meteo forecast query. A UHSLC station can be a co-located instrument rather than the BoM SEAFRAME gauge itself.",
+  "stations": [
+    {"location": "Cook Islands",                   "uhslc_id": 23,  "uhslc_name": "Rarotonga",  "lat": -21.2,    "lon": -159.7867, "basis": "Rarotonga chosen over Penrhyn (the other Cook Islands station) as the national monitoring site in Avarua; site name not confirmed in a BoM document", "confidence": "likely"},
+    {"location": "FIJI",                           "uhslc_id": 402, "uhslc_name": "Lautoka",    "lat": -17.605,  "lon": 177.4383,  "basis": "Lautoka chosen over Suva as the project's Fiji site; site name not confirmed in a BoM document", "confidence": "likely"},
+    {"location": "Federated States of Micronesia", "uhslc_id": 1,   "uhslc_name": "Pohnpei",    "lat": 6.9783,   "lon": 158.1967,  "basis": "only UHSLC station in the country", "confidence": "likely"},
+    {"location": "KIRIBATI",                       "uhslc_id": 2,   "uhslc_name": "Tarawa",     "lat": 1.3633,   "lon": 172.93,    "basis": "Tarawa chosen over Kanton and Christmas Island (the capital, and the station nearest the dataset's coordinate)", "confidence": "likely"},
+    {"location": "Marshall Islands",               "uhslc_id": 5,   "uhslc_name": "Majuro",     "lat": 7.1083,   "lon": 171.3717,  "basis": "SEAFRAME on the Uliga main wharf, Majuro (Marshall Islands climate-change site); Kwajalein is a separate US station", "confidence": "confirmed"},
+    {"location": "NAURU",                          "uhslc_id": 4,   "uhslc_name": "Nauru",      "lat": -0.5317,  "lon": 166.91,    "basis": "only UHSLC station in the country", "confidence": "likely"},
+    {"location": "NIUE",                           "uhslc_id": 598, "uhslc_name": "Alofi",      "lat": -19.05,   "lon": -169.9167, "basis": "only UHSLC station in the country", "confidence": "likely"},
+    {"location": "Papua New Guinea",               "uhslc_id": 400, "uhslc_name": "Lombrum",    "lat": -2.0367,  "lon": 147.375,   "basis": "SEAFRAME at Manus (Lombrum) since September 1994 (PSMSL Pacific country report)", "confidence": "confirmed"},
+    {"location": "SAMOA",                          "uhslc_id": 401, "uhslc_name": "Apia",       "lat": -13.82,   "lon": -171.7567, "basis": "only UHSLC station in independent Samoa (Pago Pago is American Samoa)", "confidence": "likely"},
+    {"location": "Solomon Islands",                "uhslc_id": 9,   "uhslc_name": "Honiara",    "lat": -9.4217,  "lon": 159.955,   "basis": "only UHSLC station in the country", "confidence": "likely"},
+    {"location": "TONGA",                          "uhslc_id": 38,  "uhslc_name": "Nuku'alofa", "lat": -21.14,   "lon": -175.18,   "basis": "SEAFRAME installed at Nuku'alofa in January 1993 (PSMSL Pacific country report)", "confidence": "confirmed"},
+    {"location": "TUVALU",                         "uhslc_id": 25,  "uhslc_name": "Funafuti",   "lat": -8.5033,  "lon": 179.21,    "basis": "only UHSLC station in the country", "confidence": "likely"},
+    {"location": "VANUATU",                        "uhslc_id": 46,  "uhslc_name": "Port Vila",  "lat": -17.7617, "lon": 168.2933,  "basis": "only UHSLC station in the country", "confidence": "likely"}
+  ],
+  "unmatched": []
+}

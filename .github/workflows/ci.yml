@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   python-lab:
     runs-on: ubuntu-latest
@@ -24,3 +27,27 @@ jobs:
           pip install -r requirements.txt pytest
       - name: Gymnasium environment checker + closed-loop smoke tests
         run: pytest -q tests
+
+  live-etl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Live-data ETL tests (offline, standard library only)
+        run: |
+          pip install pytest
+          pytest -q etl/tests
+
+  site-js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Browser formula and live-panel tests
+        run: |
+          node app/test_app_math.js
+          node app/test_live.js

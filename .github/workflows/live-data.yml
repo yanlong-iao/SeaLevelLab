@@ -1,0 +1,78 @@
+name: live-data
+
+# Daily ETL: UHSLC tide gauges + Open-Meteo marine forecast -> SQLite -> docs/live/*.json -> GitHub Pages.
+on:
+  schedule:
+    - cron: "17 3 * * *"        # 03:17 UTC daily (off the hour, when the Actions queue is quieter)
+  workflow_dispatch:
+
+permissions:
+  contents: write                # commit the refreshed export
+  pages: write                   # ask Pages to rebuild after the bot's commit
+
+concurrency:
+  group: live-data
+  cancel-in-progress: false
+
+jobs:
+  etl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Unit tests (parsing, schema, upsert, failure policy)
+        run: |
+          pip install pytest
+          pytest -q etl/tests
+
+      # The database is the ETL's working store; it persists between runs in the Actions cache.
+      # If the cache is evicted, the next run rebuilds from the APIs and the site keeps the last good export meanwhile.
+      - name: Restore database
+        uses: actions/cache/restore@v4
+        with:
+          path: data/live/sealevel_live.sqlite
+          key: sealevel-live-db-${{ github.run_id }}
+          restore-keys: sealevel-live-db-
+
+      - name: Fetch, validate, upsert, export
+        id: etl
+        run: python -m etl.live_sealevel
+
+      - name: Save database
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/live/sealevel_live.sqlite
+          key: sealevel-live-db-${{ github.run_id }}
+
+      - name: Attach database to this run (downloadable for 14 days)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sealevel_live-sqlite
+          path: data/live/sealevel_live.sqlite
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Commit the export if it changed
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/live/live_data.json
+          if git diff --cached --quiet; then
+            echo "data unchanged: nothing committed (the run is still recorded in the database and the run log)"
+          else
+            git add docs/live/status.json
+            git commit -m "live data: $(date -u +%Y-%m-%dT%H:%MZ)"
+            git pull --rebase --autostash origin main
+            git push
+            gh api -X POST "repos/${{ github.repository }}/pages/builds" || echo "Pages rebuild request failed; the next push will rebuild"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
