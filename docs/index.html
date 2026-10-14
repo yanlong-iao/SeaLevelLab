@@ -65,10 +65,11 @@
   .status.ok i { background:#2e9d5b; box-shadow:0 0 0 4px rgba(46,157,91,.16); }
   .status.bad i { background:#d2573a; }
   .status b { color:var(--ink); font-weight:600; }
-  .status .go { margin-left:auto; color:var(--tide); white-space:nowrap; }
+  .status #status-t { flex:1 1 0; min-width:0; }
+  .status .go { flex:none; color:var(--tide); white-space:nowrap; }
   .entry.new { border-color:#9fd0b4; }
   .entry .pill { display:inline-block; margin-left:6px; font-size:.72rem; color:#1d6b3f; background:#e3f3ea; border-radius:3px; padding:0 6px; font-weight:600; vertical-align:2px; }
-  @media (max-width: 700px) { .status .go { margin-left:0; } .grid { grid-template-columns:1fr; } .hero { padding:22px 18px; } .sub { display:block; margin:12px 0 0; } }
+  @media (max-width: 700px) { .status #status-t { flex-basis:calc(100% - 30px); } .status .go { margin-left:19px; } .grid { grid-template-columns:1fr; } .hero { padding:22px 18px; } .sub { display:block; margin:12px 0 0; } }
 </style>
 </head>
 <body>

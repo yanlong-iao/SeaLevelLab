@@ -233,7 +233,7 @@ footer { color:var(--muted); font-size:.85rem; margin-top:50px; }
       var hay = JSON.stringify(x).toLowerCase();
       return words.every(function (w) { return hay.indexOf(w) >= 0; });
     });
-    var F = [["provider", "Provider"], ["obtained", "How it is obtained"], ["auth", "Auth"], ["frequency", "Update frequency"], ["format", "Format"],
+    var F = [["obtained", "How it is obtained"], ["auth", "Auth"], ["frequency", "Update frequency"], ["format", "Format"],
              ["transform", "Transform steps"], ["stored", "Where it is stored"], ["used_by", "Used by"], ["failure", "Failure handling"]];
     document.getElementById("int-list").innerHTML = rows.length ? rows.map(function (x) {
       return '<details class="int"><summary><b>' + E(x.name) + '</b><span class="type t-' + E(x.type.replace(/[^a-z]+/gi, "-").toLowerCase()) + '">' + E(x.type) + '</span><span class="prov">' + E(x.provider) + "</span></summary><dl>" +
