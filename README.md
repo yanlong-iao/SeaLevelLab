@@ -3,12 +3,19 @@
 **The intelligence layer of a self-driving laboratory, built on a Bayesian spatial model of Pacific sea-level rise.**
 
 [![ci](https://github.com/yanlong-iao/SeaLevelLab/actions/workflows/ci.yml/badge.svg)](https://github.com/yanlong-iao/SeaLevelLab/actions/workflows/ci.yml)
+[![live-data](https://github.com/yanlong-iao/SeaLevelLab/actions/workflows/live-data.yml/badge.svg)](https://github.com/yanlong-iao/SeaLevelLab/actions/workflows/live-data.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](ai4s/requirements.txt)
 [![R 4.5 · Quarto](https://img.shields.io/badge/R-4.5%20%C2%B7%20Quarto-276DC3.svg)](flood_ai4s.qmd)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Live site](https://img.shields.io/badge/live%20site-GitHub%20Pages-0E7A8A.svg)](https://yanlong-iao.github.io/SeaLevelLab/)
 
-**Interactive query app:** [docs/app.html](https://yanlong-iao.github.io/SeaLevelLab/app.html) — a pan-and-zoom map of the tropical Pacific with the exceedance-probability field, P(annual maximum sea level exceeds this station's own 1-in-N baseline level), painted over it for any year 2000–2100 and baseline return period. Click any location and a panel slides in with the probability, its 90 % credible interval, a local 3D surface (±6° × ±5°), data support and the nearest gauge; click a gauge for its annual maxima and fitted GEV return-level curve. Non-stationary GEV on de-trended annual maxima; R computes, the page is static (only the basemap tiles are fetched).
+**Interactive query app:** [docs/app.html](https://yanlong-iao.github.io/SeaLevelLab/app.html) — a pan-and-zoom map of the tropical Pacific with the exceedance-probability field, P(annual maximum sea level exceeds this station's own 1-in-N baseline level), painted over it for any year 2000–2100 and baseline return period. Click any location and a panel slides in with the probability, its 90 % credible interval, a local 3D surface (±6° × ±5°), data support and the nearest gauge; click a gauge for its annual maxima and fitted GEV return-level curve. Non-stationary GEV on de-trended annual maxima; R computes, the page is static.
+
+**Live data:** a daily GitHub Actions ETL ([`etl/live_sealevel.py`](etl/live_sealevel.py)) pulls hourly tide-gauge readings from the
+UHSLC Fast Delivery ERDDAP API and a 7-day modelled forecast from the Open-Meteo Marine API for all 13 gauges, validates every
+response, upserts into SQLite and exports small JSON files; each gauge's **Live data** tab shows the last 30 days and the next 7,
+and the forecast is refreshed live from the browser. Every source, API and store, with its failure handling, is on the
+[Data & integrations](https://yanlong-iao.github.io/SeaLevelLab/integrations.html) page.
 
 A tide-gauge network *is* a laboratory whose experiments are expensive: deploying a gauge or running a
 survey campaign at a location. This project takes a classical R-INLA / SPDE spatial model of monthly sea level
@@ -100,6 +107,14 @@ python run_demo.py --live      # let an LLM drive the lab (OPENAI_API_KEY, or OP
 pytest tests                   # 8 smoke tests, also run in CI
 ```
 
+**Live-data ETL** (standard library only, no key)
+
+```bash
+python -m etl.live_sealevel             # fetch UHSLC + Open-Meteo -> data/live/sealevel_live.sqlite -> docs/live/*.json
+python -m etl.live_sealevel --export-only
+pytest etl/tests && node app/test_live.js
+```
+
 **RStudio live demo** — open [`flood_ai4s.qmd`](flood_ai4s.qmd) and press *Render* (INLA, plotly, R6, reticulate, ellmer).
 The rendered notebook is served at **https://yanlong-iao.github.io/SeaLevelLab/demo.html** (~10 MB), the five-phase engineering write-up
 (math bridge, MDP design, agentic workflow, benchmark, interview pitch) at **https://yanlong-iao.github.io/SeaLevelLab/report.html**,
@@ -113,6 +128,11 @@ and the site landing page at **https://yanlong-iao.github.io/SeaLevelLab/**.
 ├── R/gp_core.R              shared Matérn GP core (k_matern, gp_post, gp_post_diag, gp_fit) used by the qmd and the app
 ├── app/build_app.R          joint GEV MLE (shared xi), GP fields for trend and log-scale, IPV site, self-checks → docs/app_data.js + docs/vendor/
 ├── app/test_app_math.js     node gate for the browser-side formulas (baseline check, monotonicity, band order, raster y-flip)
+├── app/test_live.js         node checks for the live-data front end (validation, chart, status)
+├── etl/
+│   ├── live_sealevel.py     daily ETL: UHSLC ERDDAP + Open-Meteo Marine -> validate -> SQLite upsert -> docs/live/*.json
+│   ├── station_map.json     the 13 gauges mapped to UHSLC stations, with match basis and confidence
+│   └── tests/               parsing, schema rejection, idempotent upsert, failure policy, integrations-page references
 ├── Processed_Final_data.csv 13 Pacific tide gauges, monthly, 1992–2025
 ├── ai4s/
 │   ├── sea_level_twin.py    data → rise rates → Matérn GP (MAP-II) → hidden-truth sampler → measure()
@@ -126,6 +146,8 @@ and the site landing page at **https://yanlong-iao.github.io/SeaLevelLab/**.
 └── docs/                    GitHub Pages site (.nojekyll)
     ├── index.html           landing page: what the project is, entry points, method, data, the probability definition
     ├── app.html             interactive map (+ app_math.js, app_data.js, vendor/; plotly is lazy-loaded on first panel open)
+    ├── integrations.html    data & integrations: flow diagrams, live pipeline status, live API probes (from data/integrations.json)
+    ├── live.js, live/       live-data tab, status badge and the ETL's exported JSON
     ├── report.html          engineering report
     └── demo.html            full Quarto analysis (~10 MB)
 ```
@@ -136,6 +158,11 @@ Monthly sea-level statistics from the Pacific Sea Level and Geodetic Monitoring 
 13 stations: Cook Islands, Fiji, Federated States of Micronesia, Kiribati, Marshall Islands, Nauru, Niue, Papua New Guinea,
 Samoa, Solomon Islands, Tonga, Tuvalu, Vanuatu. `Mean` is relative to each gauge's own datum, so the comparable physical
 target used throughout is the **rise rate** (trend + annual cycle fit per station), 1.5–9.8 mm/yr.
+
+Live layer: [UHSLC Fast Delivery](https://uhslc.soest.hawaii.edu/) hourly sea level (free use and redistribution, not for legal use;
+~4–6 week lag) and the [Open-Meteo Marine API](https://open-meteo.com/en/docs/marine-weather-api) `sea_level_height_msl`
+(CC BY 4.0, non-commercial; modelled, limited coastal accuracy). They use different datums, so the site only ever shows each
+series as an anomaly from its own mean.
 
 ## References
 

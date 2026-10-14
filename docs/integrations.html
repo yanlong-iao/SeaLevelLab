@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data &amp; Integrations</title>
+<meta name="description" content="Where every number on SeaLevelLab comes from: the BoM archive, two live REST APIs called by a daily ETL into SQLite, map tiles, an LLM endpoint, and how a request flows from source to screen.">
+<meta property="og:title" content="SeaLevelLab — data &amp; integrations">
+<meta property="og:description" content="Sources, APIs, storage and the daily pipeline behind SeaLevelLab, with live run status.">
+<meta property="og:image" content="https://yanlong-iao.github.io/SeaLevelLab/belief_map.png">
+<meta property="og:url" content="https://yanlong-iao.github.io/SeaLevelLab/integrations.html">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%230e6f82'/%3E%3Cpath d='M10 36c6-8 12-8 18 0s12 8 18 0 6-8 8-6' fill='none' stroke='%23fff' stroke-width='5' stroke-linecap='round'/%3E%3Cpath d='M10 46c6-8 12-8 18 0s12 8 18 0' fill='none' stroke='%23bfe3ea' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+:root { --ink:#1b2a33; --muted:#5a6b78; --line:#d5dde3; --soft:#eef3f6; --card:#fff; --bg:#f3f6f8; --accent:#0e6f82; --accent-soft:#e6f2f5;
+        --ok:#1d6b3f; --ok-soft:#e3f3ea; --warn:#8a2f18; --warn-soft:#fbe6df; --amber:#7a5300; --amber-soft:#fff4dc; --code:#f5f7f9; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --ink:#e4ebef; --muted:#9aabb6; --line:#2c3a43; --soft:#1f2a31; --card:#172127; --bg:#10181d; --accent:#4fb3c6; --accent-soft:#16323a;
+  --ok:#7fd1a0; --ok-soft:#173527; --warn:#f2a48e; --warn-soft:#3a2119; --amber:#e9c46a; --amber-soft:#352b14; --code:#1c262c; } }
+:root[data-theme="dark"] { --ink:#e4ebef; --muted:#9aabb6; --line:#2c3a43; --soft:#1f2a31; --card:#172127; --bg:#10181d; --accent:#4fb3c6; --accent-soft:#16323a;
+  --ok:#7fd1a0; --ok-soft:#173527; --warn:#f2a48e; --warn-soft:#3a2119; --amber:#e9c46a; --amber-soft:#352b14; --code:#1c262c; }
+* { box-sizing:border-box; }
+html, body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif; font-size:16px; line-height:1.55; }
+a { color:var(--accent); }
+.sl-nav{position:sticky;top:0;z-index:2000;display:flex;align-items:center;gap:14px;height:44px;padding:0 14px;background:var(--card);border-bottom:1px solid var(--line);font-size:13.5px}
+.sl-brand{font-weight:700;color:var(--accent);text-decoration:none;white-space:nowrap}
+.sl-links{display:flex;gap:2px;overflow-x:auto;white-space:nowrap;scrollbar-width:none}
+.sl-links::-webkit-scrollbar{display:none}
+.sl-links a{color:var(--muted);text-decoration:none;padding:6px 10px;border-radius:4px;display:inline-flex;align-items:center;gap:6px}
+.sl-links a:hover{background:var(--soft);color:var(--ink)}
+.sl-links a.on{color:var(--accent);font-weight:600;background:var(--accent-soft)}
+.sl-tag{font-size:10.5px;color:var(--warn);background:var(--warn-soft);border-radius:3px;padding:1px 5px;font-weight:500}
+.sl-live{font-size:10px;color:var(--ok);background:var(--ok-soft);border-radius:3px;padding:1px 5px;font-weight:600}
+main { max-width:1040px; margin:0 auto; padding:26px 16px 70px; }
+.eyebrow { font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--accent); font-weight:600; margin-bottom:8px; }
+h1 { font-size:clamp(1.55rem,3.4vw,2.15rem); line-height:1.15; margin:0 0 12px; letter-spacing:-.01em; }
+h2 { font-size:1.3rem; margin:44px 0 6px; letter-spacing:-.005em; scroll-margin-top:60px; }
+h2 + .lede { margin-top:0; }
+h3 { font-size:1rem; margin:0 0 6px; }
+.lede { color:var(--muted); max-width:70ch; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:18px 20px; }
+.hero p { margin:0 0 10px; max-width:72ch; }
+.nums { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin:18px 0 4px; }
+.num { background:var(--soft); border-radius:6px; padding:10px 12px; }
+.num b { display:block; font-size:1.6rem; line-height:1.1; color:var(--accent); font-variant-numeric:tabular-nums; }
+.num span { font-size:.85rem; color:var(--muted); }
+.toc { display:flex; flex-wrap:wrap; gap:6px; margin:16px 0 0; }
+.toc a { font-size:.85rem; text-decoration:none; border:1px solid var(--line); border-radius:14px; padding:3px 11px; color:var(--muted); background:var(--card); }
+.toc a:hover { color:var(--accent); border-color:var(--accent); }
+/* status */
+.status-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin:12px 0; }
+.status-grid .num b { font-size:1.15rem; }
+.dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align:1px; background:var(--muted); }
+.dot.ok { background:#2e9d5b; } .dot.partial { background:#d9a520; } .dot.failed { background:#d2573a; }
+table { width:100%; border-collapse:collapse; font-size:.86rem; }
+th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { color:var(--muted); font-weight:600; font-size:.78rem; text-transform:uppercase; letter-spacing:.05em; }
+td.n { font-variant-numeric:tabular-nums; text-align:right; }
+.scroll { overflow-x:auto; }
+/* inspector */
+.probe { border:1px solid var(--line); border-radius:8px; background:var(--card); padding:14px 16px; margin:10px 0; }
+.probe .top { display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap; }
+.probe .top div { flex:1; min-width:220px; }
+.probe button { font:inherit; font-size:.88rem; font-weight:600; background:var(--accent); color:#fff; border:0; border-radius:5px; padding:8px 14px; cursor:pointer; }
+:root[data-theme="dark"] .probe button { color:#0b1a1f; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .probe button { color:#0b1a1f; } }
+.probe button:disabled { opacity:.55; cursor:default; }
+.probe .why { font-size:.85rem; color:var(--muted); margin:4px 0 0; }
+.log { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.78rem; background:var(--code); border-radius:6px; padding:10px 12px; margin:10px 0 0; white-space:pre-wrap; word-break:break-all; display:none; line-height:1.6; }
+.log.on { display:block; }
+.log .t { color:var(--muted); } .log .g { color:var(--ok); font-weight:600; } .log .r { color:var(--warn); font-weight:600; }
+/* diagram */
+.flow-t { margin:20px 0 2px; } .flow-n { margin:0 0 8px; font-size:.9rem; color:var(--muted); max-width:75ch; }
+.flow-box { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px; overflow-x:auto; text-align:center; }
+.flow-box svg { max-width:100%; height:auto; min-width:560px; }
+.legend { font-size:.82rem; color:var(--muted); margin:8px 2px 0; }
+/* integrations */
+.tools { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin:12px 0; }
+.tools input { flex:1; min-width:200px; font:inherit; font-size:.92rem; padding:8px 11px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink); }
+.chip { font:inherit; font-size:.8rem; padding:4px 10px; border:1px solid var(--line); border-radius:14px; background:var(--card); color:var(--muted); cursor:pointer; }
+.chip.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+.int { background:var(--card); border:1px solid var(--line); border-radius:8px; margin:10px 0; }
+.int summary { list-style:none; cursor:pointer; padding:13px 16px; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
+.int summary::-webkit-details-marker { display:none; }
+.int summary::before { content:"▸"; color:var(--muted); font-size:.8rem; width:10px; }
+.int[open] summary::before { content:"▾"; }
+.int summary b { font-size:.98rem; }
+.int summary .prov { color:var(--muted); font-size:.86rem; flex-basis:100%; padding-left:20px; }
+.type { font-size:.72rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em; border-radius:3px; padding:1px 7px; background:var(--soft); color:var(--muted); }
+.type.t-rest-api { background:var(--ok-soft); color:var(--ok); } .type.t-database, .type.t-file-store { background:var(--accent-soft); color:var(--accent); }
+.type.t-llm-api, .type.t-sdk { background:var(--amber-soft); color:var(--amber); }
+.int dl { display:grid; grid-template-columns:150px 1fr; gap:6px 14px; margin:0; padding:2px 18px 16px 36px; font-size:.88rem; }
+.int dt { color:var(--muted); } .int dd { margin:0; }
+.int .code a, .int .code span.p { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.8rem; }
+.int .note { grid-column:1/-1; background:var(--soft); border-radius:5px; padding:8px 10px; font-size:.84rem; color:var(--ink); }
+.empty { color:var(--muted); font-size:.9rem; padding:10px 2px; }
+/* steps */
+ol.steps { list-style:none; counter-reset:s; padding:0; margin:12px 0; }
+ol.steps li { counter-increment:s; position:relative; padding:10px 14px 10px 50px; background:var(--card); border:1px solid var(--line); border-radius:8px; margin:8px 0; font-size:.93rem; }
+ol.steps li::before { content:counter(s); position:absolute; left:14px; top:10px; width:24px; height:24px; border-radius:50%; background:var(--accent); color:var(--card); font-weight:700; font-size:.8rem; display:flex; align-items:center; justify-content:center; }
+ol.steps .c { display:block; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.76rem; color:var(--muted); margin-top:3px; }
+.two { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.two ul { margin:6px 0 0; padding-left:1.1em; } .two li { margin:6px 0; font-size:.92rem; }
+.roadmap { font-size:.9rem; color:var(--muted); }
+.role li { margin:6px 0; }
+/* delivery */
+.stages { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:12px; margin:12px 0; }
+.stage { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px 16px; position:relative; }
+.stage .k { font-size:.72rem; font-weight:700; color:var(--accent); letter-spacing:.08em; }
+.stage p { margin:4px 0; font-size:.88rem; }
+.stage p i { color:var(--muted); font-style:normal; font-weight:600; }
+.stage .ev { font-size:.83rem; margin-top:8px; padding-top:8px; border-top:1px dashed var(--line); }
+.stage .ev a { display:block; margin:2px 0; }
+.weeks { display:grid; grid-template-columns:110px 1fr; gap:0; background:var(--card); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+.weeks div { padding:10px 14px; border-bottom:1px solid var(--line); font-size:.9rem; } .weeks div:nth-last-child(-n+2) { border-bottom:0; }
+.weeks .d { font-weight:700; color:var(--accent); background:var(--soft); }
+footer { color:var(--muted); font-size:.85rem; margin-top:50px; }
+@media (max-width:700px) {
+  .two { grid-template-columns:1fr; }
+  .int dl { grid-template-columns:1fr; padding:0 14px 14px 16px; gap:0 0; }
+  .int dt { margin-top:8px; font-size:.78rem; text-transform:uppercase; letter-spacing:.05em; }
+  .weeks { grid-template-columns:1fr; } .weeks .d { border-bottom:0; padding-bottom:2px; }
+  table.runs th:nth-child(4), table.runs td:nth-child(4), table.runs th:nth-child(5), table.runs td:nth-child(5) { display:none; }
+}
+</style>
+</head>
+<body>
+<nav class="sl-nav" aria-label="Site"><a class="sl-brand" href="./">SeaLevelLab</a><div class="sl-links"><a href="./">Overview</a><a href="walkthrough.html">Walkthrough</a><a href="app.html">Interactive map</a><a href="report.html">Engineering report</a><a href="demo.html">Full analysis <span class="sl-tag">~10 MB, slow on mobile</span></a><a href="integrations.html" class="on">Data &amp; integrations <span class="sl-live">live</span></a><a href="https://github.com/yanlong-iao/SeaLevelLab" target="_blank" rel="noopener">GitHub</a></div></nav>
+<main id="main">
+  <div class="empty">Loading…</div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="live.js"></script>
+<script>
+(function () {
+  "use strict";
+  var E = function (s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
+  var main = document.getElementById("main");
+  var DATA_URL = "data/integrations.json";
+
+  fetch(DATA_URL, { cache: "no-cache" }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(render, function (e) { main.innerHTML = '<p class="empty">Could not load ' + DATA_URL + " (" + E(e.message) + ").</p>"; });
+
+  function codeLink(P, c) {
+    var label = c.path + (c.symbol ? " · " + c.symbol : "");
+    if (!P.code_public) return '<span class="p">' + E(label) + "</span>";
+    var url = P.repo + "/blob/main/" + c.path.split("/").map(encodeURIComponent).join("/");
+    return '<a href="' + E(url) + '" target="_blank" rel="noopener">' + E(label) + "</a>";
+  }
+
+  function render(J) {
+    var P = J.project, h = [];
+    document.title = "Data & Integrations · " + P.name;
+    // ---------- 1. plain-language summary
+    h.push('<div class="eyebrow">Data &amp; integrations</div><h1>Where every number on this site comes from, and how it gets here</h1>');
+    h.push('<section class="card hero"><p>' + E(P.plain_summary) + "</p>");
+    if (P.numbers) h.push('<div class="nums">' + P.numbers.map(function (n) { return '<div class="num"><b>' + E(n.k) + "</b><span>" + E(n.v) + "</span></div>"; }).join("") + "</div>");
+    var toc = [["flow", "Data flow"], J.status ? ["status", "Live status"] : null, J.probes ? ["try", "Try a live request"] : null, ["integrations", "All integrations"],
+               ["request", "How a request flows"], ["reliability", "Reliability & security"], ["role", "My role"], J.delivery ? ["delivery", "How I'd deliver your platform"] : null].filter(Boolean);
+    h.push('<nav class="toc" aria-label="On this page">' + toc.map(function (t) { return '<a href="#' + t[0] + '">' + E(t[1]) + "</a>"; }).join("") + "</nav></section>");
+
+    // ---------- 2. diagram
+    h.push('<h2 id="flow">Data flow</h2><p class="lede">Left to right: who provides the data, how it is fetched and processed, where it is stored, and which part of the site shows it. Solid arrows run on a schedule or at build time; dotted arrows run on demand. Cylinders are data stores.</p>');
+    J.flows.forEach(function (f, i) {
+      h.push('<h3 class="flow-t">' + E(f.title) + '</h3><p class="flow-n">' + E(f.note) + '</p><div class="flow-box" id="flow-box-' + i + '"><div class="empty">Drawing the diagram…</div></div>');
+    });
+
+    // ---------- 3. status
+    if (J.status) h.push('<h2 id="status">Live status of the daily pipeline</h2><p class="lede">Read from <a href="' + E(J.status.file) + '">' + E(J.status.file) + '</a>, which the pipeline rewrites on every run that changes the data. Full logs: <a href="' + E(J.status.workflow) + '" target="_blank" rel="noopener">GitHub Actions</a>.</p><div id="status-box" class="card"><div class="empty">Loading status…</div></div>');
+
+    // ---------- 4. probes
+    if (J.probes) {
+      h.push('<h2 id="try">Try a live request from your browser</h2><p class="lede">These buttons call the real third-party services from this page, now, and show each step. One of them is expected to fail, and the failure is the reason the architecture looks the way it does.</p>');
+      J.probes.forEach(function (p, i) {
+        h.push('<div class="probe"><div class="top"><div><h3>' + E(p.label) + '</h3><p class="why">' + E(p.why) + '</p></div><button data-i="' + i + '">Run request</button></div><div class="log" id="log-' + i + '"></div></div>');
+      });
+    }
+
+    // ---------- 5. integrations
+    var types = []; J.integrations.forEach(function (x) { if (types.indexOf(x.type) < 0) types.push(x.type); });
+    h.push('<h2 id="integrations">All integrations (' + J.integrations.length + ')</h2><p class="lede">Every external source, service and data store the code actually uses, traced from origin to screen. Open a row for the details and the exact code.' +
+           (P.code_public ? ' Generated from <a href="' + E(P.repo) + '/blob/main/docs/data/integrations.json" target="_blank" rel="noopener">integrations.json</a>; a test checks that every code reference below still exists.' : ' The source repository is private; file paths are shown for reference and the code is available on request.') + "</p>");
+    h.push('<div class="tools"><input id="q" type="search" placeholder="Search: API, SQLite, retry, key…" aria-label="Search integrations"><span id="chips">' +
+           '<button class="chip on" data-t="">All</button>' + types.map(function (t) { return '<button class="chip" data-t="' + E(t) + '">' + E(t) + "</button>"; }).join(" ") + '</span></div><div id="int-list"></div>');
+
+    // ---------- 6. request flow
+    var rf = J.request_flow;
+    h.push('<h2 id="request">' + E(rf.title) + '</h2><ol class="steps">' + rf.steps.map(function (s) {
+      return "<li>" + E(s.what) + (s.code ? '<span class="c">' + codeLink(P, s.code) + "</span>" : "") + "</li>"; }).join("") + "</ol>");
+
+    // ---------- 7. reliability & security
+    h.push('<h2 id="reliability">Reliability and security</h2><div class="two"><section class="card"><h3>When a provider is slow or down</h3><ul>' +
+      J.reliability.map(function (r) { return "<li><b>" + E(r.t) + ".</b> " + E(r.d) + "</li>"; }).join("") + '</ul></section><section class="card"><h3>Keys, access and licences</h3><ul>' +
+      J.security.map(function (r) { return "<li><b>" + E(r.t) + ".</b> " + E(r.d) + "</li>"; }).join("") + "</ul></section></div>");
+    if (J.roadmap && J.roadmap.length) h.push('<p class="roadmap">' + J.roadmap.map(E).join("<br>") + "</p>");
+
+    // ---------- 8. role
+    h.push('<h2 id="role">My role</h2><section class="card"><ul class="role">' + P.role.map(function (r) { return "<li>" + E(r) + "</li>"; }).join("") + "</ul>" +
+           (P.see_also ? '<p style="margin:10px 0 0">' + P.see_also.map(function (s) { return '<a href="' + E(s.url) + '" target="_blank" rel="noopener">' + E(s.label) + "</a>"; }).join(" · ") + "</p>" : "") + "</section>");
+
+    // ---------- 9. delivery
+    if (J.delivery) {
+      var Dl = J.delivery;
+      h.push('<h2 id="delivery">How I\'d deliver your platform</h2><p class="lede">' + E(Dl.intro) + '</p><div class="stages">' + Dl.stages.map(function (s, i) {
+        return '<div class="stage"><div class="k">STEP ' + (i + 1) + "</div><h3>" + E(s.t) + "</h3><p><i>I do:</i> " + E(s.do) + "</p><p><i>You see:</i> " + E(s.see) + '</p><div class="ev">Evidence: ' +
+          s.evidence.map(function (e) { var ext = /^https?:/.test(e.url); return '<a href="' + E(e.url) + '"' + (ext ? ' target="_blank" rel="noopener"' : "") + ">" + E(e.label) + "</a>"; }).join("") + "</div></div>";
+      }).join("") + "</div>");
+      h.push('<h3 style="margin-top:22px">The first two weeks</h3><div class="weeks">' + Dl.first_two_weeks.map(function (w) { return '<div class="d">' + E(w.d) + "</div><div>" + E(w.t) + "</div>"; }).join("") + "</div>");
+    }
+    h.push('<footer>' + E(P.name) + ' · <a href="' + E(P.live) + '">' + E(P.live.replace(/^https?:\/\//, "")) + "</a>" + (P.code_public ? ' · <a href="' + E(P.repo) + '">source</a>' : "") + "</footer>");
+    main.innerHTML = h.join("");
+
+    drawList(J);
+    var q = document.getElementById("q"), active = "";
+    q.addEventListener("input", function () { drawList(J, q.value, active); });
+    document.getElementById("chips").addEventListener("click", function (e) {
+      var b = e.target.closest("button"); if (!b) return; active = b.getAttribute("data-t");
+      Array.prototype.forEach.call(this.querySelectorAll("button"), function (x) { x.classList.toggle("on", x === b); });
+      drawList(J, q.value, active);
+    });
+    if (J.status) loadStatus(J.status);
+    if (J.probes) Array.prototype.forEach.call(document.querySelectorAll(".probe button"), function (b) {
+      b.addEventListener("click", function () { runProbe(J.probes[+b.getAttribute("data-i")], document.getElementById("log-" + b.getAttribute("data-i")), b); });
+    });
+    FLOWS = J.flows; drawFlow();
+    if (location.hash) { var t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView(); }
+  }
+
+  function drawList(J, q, type) {
+    var P = J.project, words = (q || "").toLowerCase().split(/\s+/).filter(Boolean);
+    var rows = J.integrations.filter(function (x) {
+      if (type && x.type !== type) return false;
+      var hay = JSON.stringify(x).toLowerCase();
+      return words.every(function (w) { return hay.indexOf(w) >= 0; });
+    });
+    var F = [["provider", "Provider"], ["obtained", "How it is obtained"], ["auth", "Auth"], ["frequency", "Update frequency"], ["format", "Format"],
+             ["transform", "Transform steps"], ["stored", "Where it is stored"], ["used_by", "Used by"], ["failure", "Failure handling"]];
+    document.getElementById("int-list").innerHTML = rows.length ? rows.map(function (x) {
+      return '<details class="int"><summary><b>' + E(x.name) + '</b><span class="type t-' + E(x.type.replace(/[^a-z]+/gi, "-").toLowerCase()) + '">' + E(x.type) + '</span><span class="prov">' + E(x.provider) + "</span></summary><dl>" +
+        F.map(function (f) { return "<dt>" + f[1] + "</dt><dd>" + E(x[f[0]]) + "</dd>"; }).join("") +
+        '<dt>Code</dt><dd class="code">' + x.code.map(function (c) { return codeLink(P, c) + (c.note ? ' <span style="color:var(--muted)">— ' + E(c.note) + "</span>" : ""); }).join("<br>") + "</dd>" +
+        (x.notes ? '<div class="note">' + E(x.notes) + "</div>" : "") + "</dl></details>";
+    }).join("") : '<p class="empty">No integration matches.</p>';
+  }
+
+  function loadStatus(S) {
+    var box = document.getElementById("status-box");
+    fetch(S.file, { cache: "no-cache" }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }).then(function (st) {
+      var l = window.SLLive ? SLLive.statusLine(st) : null, lr = st.last_run;
+      var h = '<div class="status-grid">' +
+        '<div class="num"><b><span class="dot ' + E(lr.status) + '"></span>' + E(lr.status) + "</b><span>last run " + E(l ? l.run : lr.started) + "</span></div>" +
+        '<div class="num"><b>' + E(st.stations_with_obs) + " / " + E(st.stations_total) + "</b><span>gauges with fresh observations</span></div>" +
+        '<div class="num"><b>' + E(st.stations_with_forecast) + " / " + E(st.stations_total) + "</b><span>gauges with a forecast</span></div>" +
+        '<div class="num"><b>' + E(l ? l.obsTo : st.latest_observation) + "</b><span>latest gauge reading (source lags 4–6 weeks)</span></div>" +
+        (st.db_rows ? '<div class="num"><b>' + Number(st.db_rows.observations).toLocaleString() + "</b><span>hourly observations in SQLite</span></div>" : "") + "</div>";
+      h += '<div class="scroll"><table class="runs"><thead><tr><th>Run (UTC)</th><th>Status</th><th>Gauges OK</th><th>Obs rows changed</th><th>Forecast rows</th><th>Duration</th></tr></thead><tbody>' +
+        (st.history || []).slice(0, 10).map(function (r) {
+          return "<tr><td>" + E(r.started.replace("T", " ").replace("Z", "")) + '</td><td><span class="dot ' + E(r.status) + '"></span>' + E(r.status) +
+            (r.errors && r.errors.length ? ' <span title="' + E(r.errors.join("\n")) + '" style="cursor:help;color:var(--warn)">(' + r.errors.length + " errors)</span>" : "") +
+            '</td><td class="n">' + E(r.stations_ok) + "/" + E(r.stations_total) + '</td><td class="n">' + E(r.obs_rows_changed) + '</td><td class="n">' + E(r.forecast_rows) + '</td><td class="n">' + E(r.duration_s) + " s</td></tr>";
+        }).join("") + "</tbody></table></div>";
+      box.innerHTML = h;
+    }).catch(function (e) { box.innerHTML = '<p class="empty">Status unavailable (' + E(e.message) + ").</p>"; });
+  }
+
+  function runProbe(p, log, btn) {
+    var since = new Date(Date.now() - 50 * 864e5).toISOString().slice(0, 19) + "Z";
+    var url = p.url.replace("{since50}", encodeURIComponent(since)), t0 = performance.now(), lines = [];
+    var ms = function () { return Math.round(performance.now() - t0) + " ms"; };
+    var put = function (s, cls) { lines.push('<span class="t">' + ms().padStart(8) + "</span>  " + (cls ? '<span class="' + cls + '">' : "") + s + (cls ? "</span>" : "")); log.innerHTML = lines.join("\n"); };
+    log.classList.add("on"); btn.disabled = true;
+    put("GET " + E(url));
+    var ctl = new AbortController(), timer = setTimeout(function () { ctl.abort(); }, 10000);
+    fetch(url, { signal: ctl.signal }).then(function (r) {
+      put("HTTP " + r.status + " " + E(r.statusText || "") + " · content-type " + E(r.headers.get("content-type") || "?"));
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function (doc) {
+      clearTimeout(timer);
+      if (p.id === "openmeteo" && window.SLLive) {
+        var a = SLLive.parseOpenMeteo(doc), ys = a.series.map(function (x) { return x[1]; });
+        put("validated: unit m, UTC, " + a.series.length + " hourly values, all in range", "g");
+        put("model grid point " + doc.latitude.toFixed(3) + ", " + doc.longitude.toFixed(3) + " · computed by Open-Meteo in " + doc.generationtime_ms.toFixed(1) + " ms");
+        put("tidal range over the next 7 days: " + Math.round(Math.max.apply(null, ys) - Math.min.apply(null, ys)) + " mm", "g");
+      } else if (p.id === "esri_identify") {
+        var rows = (doc.results || []).map(function (x) { return x.attributes || {}; });
+        var dated = rows.filter(function (x) { var d = x["DATE (YYYYMMDD)"] || x.SRC_DATE; return d && d !== "Null"; })
+          .sort(function (x, y) { return (+x["RESOLUTION (M)"] || 99) - (+y["RESOLUTION (M)"] || 99); });
+        put("validated: " + rows.length + " imagery records at this point, " + dated.length + " with a capture date", "g");
+        if (dated[0]) {
+          var d0 = String(dated[0]["DATE (YYYYMMDD)"] || dated[0].SRC_DATE);
+          put("sharpest dated layer: captured " + (/^\d{8}$/.test(d0) ? d0.slice(0, 4) + "-" + d0.slice(4, 6) + "-" + d0.slice(6) : E(d0)) +
+              ", " + E(dated[0]["RESOLUTION (M)"] || "?") + " m resolution, source " + E([dated[0].SOURCE, dated[0].SOURCE_INFO].filter(function (v) { return v && v !== "Null"; }).join(" · ") || "?"), "g");
+        }
+      } else {
+        put("received " + JSON.stringify(doc).length.toLocaleString() + " bytes", "g");
+      }
+      put(p.expect === "ok" ? "done: " + (p.done || "same call the site makes") : "unexpected: the browser allowed it this time", p.expect === "ok" ? "g" : "");
+    }).catch(function (e) {
+      clearTimeout(timer);
+      if (p.expect === "blocked") {
+        put("the browser did not hand the response to this page: " + E(e.name === "AbortError" ? "timed out" : e.message), "r");
+        put("expected. UHSLC sends no Access-Control-Allow-Origin header, so browsers refuse to let a web page read its answer");
+        put("(browsers report this as a generic network error; the developer console shows the CORS message)");
+        put("the fix used here: a scheduled server-side job fetches it nightly and publishes a file this site can read", "g");
+      } else put("failed: " + E(e.name === "AbortError" ? "timed out after 10 s" : e.message) + " · the map would fall back to the daily snapshot", "r");
+    }).then(function () { btn.disabled = false; btn.textContent = "Run again"; });
+  }
+
+  var FLOWS = [];
+  function drawFlow() {
+    if (!window.mermaid) { FLOWS.forEach(function (f, i) { document.getElementById("flow-box-" + i).innerHTML = '<pre style="white-space:pre-wrap;font-size:.8rem">' + E(f.mermaid) + "</pre>"; }); return; }
+    var dark = document.documentElement.getAttribute("data-theme") === "dark" ||
+      (document.documentElement.getAttribute("data-theme") !== "light" && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+    var cs = getComputedStyle(document.documentElement), v = function (n) { return cs.getPropertyValue(n).trim(); };
+    mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "base", flowchart: { htmlLabels: true, curve: "basis", nodeSpacing: 28, rankSpacing: 46 },
+      themeVariables: { darkMode: dark, background: v("--card"), primaryColor: v("--accent-soft"), primaryTextColor: v("--ink"), primaryBorderColor: v("--accent"),
+        lineColor: v("--muted"), secondaryColor: v("--soft"), tertiaryColor: v("--bg"), edgeLabelBackground: v("--card"),
+        fontFamily: '-apple-system,"Segoe UI",Helvetica,Arial,sans-serif', fontSize: "14px" } });
+    FLOWS.reduce(function (pr, f, i) {
+      var box = document.getElementById("flow-box-" + i);
+      return pr.then(function () { return mermaid.render("flowsvg" + i + "_" + Date.now(), f.mermaid); })
+        .then(function (r) { box.innerHTML = r.svg; }, function () { box.innerHTML = '<pre style="white-space:pre-wrap;font-size:.8rem">' + E(f.mermaid) + "</pre>"; });
+    }, Promise.resolve());
+  }
+  if (window.matchMedia) matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () { if (FLOWS.length) drawFlow(); });
+})();
+</script>
+</body>
+</html>

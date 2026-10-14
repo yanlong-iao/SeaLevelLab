@@ -1,0 +1,533 @@
+{
+ "project": {
+  "name": "SeaLevelLab",
+  "repo": "https://github.com/yanlong-iao/SeaLevelLab",
+  "code_public": true,
+  "live": "https://yanlong-iao.github.io/SeaLevelLab/",
+  "plain_summary": "SeaLevelLab pulls sea-level data from three outside organisations, cleans and checks it, stores it, runs a statistical model on it, and shows the result on a map that anyone can open on a phone. Part of it updates itself every day without anyone touching it: a scheduled job calls two public data services, checks every answer before keeping it, saves it in a small database and republishes the site. If a service is down, the site keeps showing the last good data and says so.",
+  "numbers": [
+   {
+    "k": "3",
+    "v": "external data providers (BoM, UHSLC, Open-Meteo)"
+   },
+   {
+    "k": "2",
+    "v": "live REST APIs, called daily by a scheduled job"
+   },
+   {
+    "k": "13",
+    "v": "tide gauges mapped to live stations"
+   },
+   {
+    "k": "1",
+    "v": "SQLite database, 4 tables"
+   },
+   {
+    "k": "0",
+    "v": "servers to run: static site + scheduled jobs"
+   }
+  ],
+  "role": [
+   "Sole developer. I chose the data sources, wrote the cleaning and the model (R / R-INLA), the Python lab (digital twin, Gymnasium environment, Bayesian optimisation, PPO, LLM agent), the live-data ETL and its database, the static web app, the tests and the CI/CD.",
+   "No team or client: the scope, the design trade-offs and the honesty notes on every page are my own decisions, recorded in the commit history and the README."
+  ]
+ },
+ "integrations": [
+  {
+   "name": "Pacific Sea Level and Geodetic Monitoring Project, monthly statistics",
+   "type": "open dataset",
+   "provider": "Australian Bureau of Meteorology (BoM)",
+   "obtained": "Bulk download of one monthly-statistics file per country (13 files), cleaned and merged in R into one table",
+   "auth": "none",
+   "frequency": "One-off snapshot, 1992 to 2025 (BoM updates monthly; the model is refitted by hand)",
+   "format": "Fixed-width text / CSV, one row per station-month (min, max, mean, sd, gaps)",
+   "transform": "Parse, coerce to numbers, drop incomplete months, de-duplicate, attach coordinates, longitudes to 0-360; then R-INLA SPDE fit, Gaussian-process rate field and GEV on annual maxima",
+   "stored": "Raw files: local only (git-ignored). Processed: Processed_Final_data.csv (committed). Model output: docs/app_data.js",
+   "used_by": "R-INLA analysis, digital twin, interactive map, walkthrough, report",
+   "failure": "Static snapshot; the build script stops with an error if the export is missing or the grid has the wrong size",
+   "code": [
+    {
+     "path": "app/build_app.R",
+     "symbol": "read.csv(\"Processed_Final_data.csv\")",
+     "note": "cleaning for the map build"
+    },
+    {
+     "path": "ai4s/sea_level_twin.py",
+     "symbol": "DEFAULT_CSV",
+     "note": "digital twin reads the same file"
+    },
+    {
+     "path": "flood_ai4s.qmd",
+     "symbol": "inla(formula",
+     "note": "R-INLA SPDE fit"
+    }
+   ],
+   "notes": "The country files carry no gauge coordinates; the dataset's coordinates are country-level approximations. The first cleaning pass (flood project.qmd) is an earlier local prototype that is not in the public repo."
+  },
+  {
+   "name": "UHSLC Fast Delivery hourly sea level",
+   "type": "REST API",
+   "provider": "University of Hawaii Sea Level Center, via its ERDDAP server",
+   "obtained": "Scheduled ETL: one HTTPS GET per gauge to ERDDAP tabledap (.json), last 75 days",
+   "auth": "none",
+   "frequency": "Daily job; the source lags real time by about 4-6 weeks",
+   "format": "JSON table: time (UTC), sea_level (mm, gauge datum); fill value -32767",
+   "transform": "Check columns, units, timestamps and value range; drop fill values; upsert by (station, hour); export the last 30 days as anomalies from their own mean",
+   "stored": "SQLite table observations -> docs/live/live_data.json",
+   "used_by": "Map app: Live data tab; home page status badge; this page",
+   "failure": "30 s timeout, 3 retries with exponential back-off, no retry on 4xx; each gauge fetched independently; if a gauge fails its previous export is kept and labelled stale",
+   "code": [
+    {
+     "path": "etl/live_sealevel.py",
+     "symbol": "def uhslc_url",
+     "note": "exact query"
+    },
+    {
+     "path": "etl/live_sealevel.py",
+     "symbol": "def parse_uhslc",
+     "note": "schema validation"
+    },
+    {
+     "path": "etl/live_sealevel.py",
+     "symbol": "def upsert_observations",
+     "note": "idempotent upsert"
+    },
+    {
+     "path": "etl/station_map.json",
+     "symbol": "uhslc_id",
+     "note": "13 gauges mapped, with basis and confidence"
+    }
+   ],
+   "notes": "ERDDAP sends no CORS header, so a browser cannot call it directly. That is why this source has to go through a server-side job."
+  },
+  {
+   "name": "Open-Meteo Marine API, sea_level_height_msl",
+   "type": "REST API",
+   "provider": "Open-Meteo",
+   "obtained": "Scheduled ETL (daily snapshot) and a live call from the visitor's browser when they open a gauge",
+   "auth": "none (free for non-commercial use)",
+   "frequency": "Daily snapshot + on demand",
+   "format": "JSON: hourly time (GMT) and sea level (m, relative to global mean sea level), 7 days ahead",
+   "transform": "Check units, UTC offset, array lengths and range; convert to mm; anomaly from the 7-day mean",
+   "stored": "SQLite table forecasts (last 14 issues per gauge) -> docs/live/live_data.json; live result is not stored",
+   "used_by": "Map app: Live data tab forecast curve",
+   "failure": "ETL: same retry policy. Browser: 8 s timeout; on any error the daily snapshot stays on screen with a 'snapshot' label and the error message",
+   "code": [
+    {
+     "path": "etl/live_sealevel.py",
+     "symbol": "def parse_openmeteo",
+     "note": "server-side validation"
+    },
+    {
+     "path": "docs/live.js",
+     "symbol": "function fetchForecastLive",
+     "note": "browser call with timeout"
+    },
+    {
+     "path": "docs/live.js",
+     "symbol": "function parseOpenMeteo",
+     "note": "same checks in the browser"
+    }
+   ],
+   "notes": "Modelled tides on a ~8 km grid; Open-Meteo states coastal accuracy is limited. Shown as a forecast shape only, never compared in absolute height with the gauges."
+  },
+  {
+   "name": "SQLite live database",
+   "type": "database",
+   "provider": "self (Python standard-library sqlite3)",
+   "obtained": "Written by the ETL",
+   "auth": "n/a",
+   "frequency": "Every ETL run",
+   "format": "Tables stations, observations, forecasts, etl_runs (status, row counts, duration, errors)",
+   "transform": "Primary keys make re-runs idempotent; forecasts pruned to the last 14 issues",
+   "stored": "data/live/sealevel_live.sqlite, persisted between runs in the GitHub Actions cache and attached to every run as a downloadable artifact (14 days)",
+   "used_by": "The export step; the run history shown on this page",
+   "failure": "If the cache is evicted the next run rebuilds it from the APIs; the site keeps the last good export meanwhile",
+   "code": [
+    {
+     "path": "etl/live_sealevel.py",
+     "symbol": "SCHEMA = ",
+     "note": "table definitions"
+    },
+    {
+     "path": ".github/workflows/live-data.yml",
+     "symbol": "actions/cache/restore",
+     "note": "persistence"
+    }
+   ],
+   "notes": "A static site has no server to hold a database, so the database lives with the job and the site reads small exports. With users writing data, this would move to a hosted Postgres behind an API."
+  },
+  {
+   "name": "Exported JSON files",
+   "type": "file store",
+   "provider": "self",
+   "obtained": "Written by the ETL, committed to the repository by the workflow, served by GitHub Pages",
+   "auth": "n/a (public)",
+   "frequency": "Committed only when the data changed",
+   "format": "live_data.json (~125 KB: hourly anomalies as hour offsets) and status.json (run history)",
+   "transform": "Validated against the contract the front end needs; written to a temp file then renamed, so readers never see half a file",
+   "stored": "docs/live/",
+   "used_by": "Map app, home page badge, this page",
+   "failure": "If validation fails nothing is written and the previous file stays live",
+   "code": [
+    {
+     "path": "etl/live_sealevel.py",
+     "symbol": "def validate_export",
+     "note": "export contract"
+    },
+    {
+     "path": "etl/live_sealevel.py",
+     "symbol": "def write_json_atomic",
+     "note": "atomic write, skip if unchanged"
+    }
+   ]
+  },
+  {
+   "name": "Basemap tiles",
+   "type": "tile service",
+   "provider": "Esri World Ocean Base (default); CARTO Positron and OpenStreetMap (selectable)",
+   "obtained": "Tile URL templates loaded by Leaflet in the browser",
+   "auth": "none",
+   "frequency": "On demand, per map view",
+   "format": "PNG raster tiles",
+   "transform": "none",
+   "stored": "Browser cache only",
+   "used_by": "Interactive map",
+   "failure": "On tile errors the map switches to an offline coastline layer baked into app_data.js and shows a notice",
+   "code": [
+    {
+     "path": "docs/app.html",
+     "symbol": "World_Ocean_Base",
+     "note": "default basemap"
+    },
+    {
+     "path": "docs/app.html",
+     "symbol": "function onTileError",
+     "note": "fallback"
+    }
+   ],
+   "notes": "CARTO's free tiles now return 'API key required' watermark tiles with HTTP 200 (no error event), so Esri is the default."
+  },
+  {
+   "name": "Coastline for the offline fallback",
+   "type": "open dataset",
+   "provider": "R packages maps / mapdata (world2Hires)",
+   "obtained": "Read once in the R build, simplified, embedded in docs/app_data.js",
+   "auth": "none",
+   "frequency": "At build time",
+   "format": "Polyline segments, longitudes 0-360",
+   "transform": "Clip to the study box, round, drop duplicate points",
+   "stored": "docs/app_data.js",
+   "used_by": "Interactive map when tiles are unavailable",
+   "failure": "If the package is missing the build writes an empty layer and warns",
+   "code": [
+    {
+     "path": "app/build_app.R",
+     "symbol": "coastline <- tryCatch",
+     "note": ""
+    }
+   ]
+  },
+  {
+   "name": "LLM endpoint for the lab agent",
+   "type": "LLM API",
+   "provider": "Any OpenAI-compatible chat-completions endpoint (OpenAI, DeepSeek, Qwen, a local Ollama server)",
+   "obtained": "openai Python SDK (ai4s/llm_agent.py) and ellmer in R (flood_ai4s.qmd), function calling with the lab's tools",
+   "auth": "OPENAI_API_KEY (+ optional OPENAI_BASE_URL) from the environment; never committed",
+   "frequency": "On demand",
+   "format": "Chat completions with tool calls",
+   "transform": "Tools return compact JSON summaries; tool inputs are validated and errors returned as text the model can re-plan from",
+   "stored": "Transcript written to ai4s/outputs/agent_transcript.txt",
+   "used_by": "Python demo (run_demo.py --live) and the R notebook's live-agent chunk",
+   "failure": "The default is a deterministic mock agent that drives the same tools with no key (used in CI); the LLM agent is opt-in (--live), and the R chunk is skipped when no key is set",
+   "code": [
+    {
+     "path": "ai4s/llm_agent.py",
+     "symbol": "from openai import OpenAI",
+     "note": ""
+    },
+    {
+     "path": "flood_ai4s.qmd",
+     "symbol": "chat_openai(",
+     "note": ""
+    }
+   ]
+  },
+  {
+   "name": "GitHub Actions and GitHub Pages",
+   "type": "platform",
+   "provider": "GitHub",
+   "obtained": "Workflows in .github/workflows; Pages serves docs/ from main",
+   "auth": "Workflow token scoped to this repository (contents: write, pages: write for the ETL only)",
+   "frequency": "CI on every push; ETL daily at 03:17 UTC and on demand",
+   "format": "n/a",
+   "transform": "CI runs the Gymnasium checker and closed-loop tests, the ETL tests and the browser-formula tests",
+   "stored": "Run logs and the database artifact on GitHub",
+   "used_by": "Everything on this site",
+   "failure": "A failed ETL marks the run red and keeps the last good data live",
+   "code": [
+    {
+     "path": ".github/workflows/ci.yml",
+     "symbol": "live-etl:",
+     "note": "tests on every push"
+    },
+    {
+     "path": ".github/workflows/live-data.yml",
+     "symbol": "cron:",
+     "note": "daily schedule"
+    }
+   ]
+  }
+ ],
+ "request_flow": {
+  "title": "What happens when you open a gauge's Live data tab",
+  "steps": [
+   {
+    "what": "You click a gauge on the map and open the Live data tab.",
+    "code": {
+     "path": "docs/app.html",
+     "symbol": "function fillLive"
+    }
+   },
+   {
+    "what": "The page loads live/live_data.json once (same site, ~125 KB, cached for the session). It was produced by last night's ETL run.",
+    "code": {
+     "path": "docs/live.js",
+     "symbol": "function load"
+    }
+   },
+   {
+    "what": "It draws the last 30 days of hourly gauge readings (UHSLC) as an SVG line, with the retrieval time and a link to the exact API query.",
+    "code": {
+     "path": "docs/live.js",
+     "symbol": "function renderPane"
+    }
+   },
+   {
+    "what": "It draws the 7-day forecast from the snapshot straight away, then asks Open-Meteo for a fresh forecast directly from your browser (8 s timeout).",
+    "code": {
+     "path": "docs/live.js",
+     "symbol": "function fetchForecastLive"
+    }
+   },
+   {
+    "what": "The answer is checked (units, UTC, lengths, range) before it replaces the snapshot. On any failure the snapshot stays and the label says why.",
+    "code": {
+     "path": "docs/live.js",
+     "symbol": "function parseOpenMeteo"
+    }
+   },
+   {
+    "what": "Behind it, every night: GitHub Actions runs the tests, restores the database, calls both APIs for 13 gauges, upserts, exports, and commits only if the data changed.",
+    "code": {
+     "path": ".github/workflows/live-data.yml",
+     "symbol": "Fetch, validate, upsert, export"
+    }
+   }
+  ]
+ },
+ "reliability": [
+  {
+   "t": "Timeouts and retries",
+   "d": "Every server-side call has a 30 s timeout and up to 3 retries with exponential back-off; client errors (4xx) are not retried. The browser call has an 8 s timeout."
+  },
+  {
+   "t": "Validate before storing",
+   "d": "Responses are checked for columns, units, time zone, timestamps and plausible ranges. A response that fails is rejected whole, not partly stored."
+  },
+  {
+   "t": "Failure isolation",
+   "d": "Each gauge and each provider is fetched independently: one failing station does not stop the other twelve."
+  },
+  {
+   "t": "Last good data stays live",
+   "d": "Exports are validated, written atomically, and committed only when the data changed. If a refresh fails the previous data stays on the site, labelled stale."
+  },
+  {
+   "t": "Idempotent",
+   "d": "Primary keys on (station, hour) make re-running a day harmless; tests check that a second run changes nothing."
+  },
+  {
+   "t": "Observable",
+   "d": "Every run is logged in the database (status, row counts, duration, errors) and summarised in status.json, which drives the badge on the home page and the run history below."
+  }
+ ],
+ "security": [
+  {
+   "t": "No secrets in the site",
+   "d": "The two live APIs need no key. The LLM key is read from the environment on the developer's machine and never committed."
+  },
+  {
+   "t": "Least-privilege automation",
+   "d": "The ETL workflow's token can write only to this repository's contents and Pages; CI has read-only access."
+  },
+  {
+   "t": "Licences respected",
+   "d": "UHSLC data: free use, not for legal use (stated in the UI). Open-Meteo: non-commercial free tier, CC BY 4.0 attribution on every chart."
+  }
+ ],
+ "roadmap": [
+  "Roadmap: refit the INLA model monthly from the accumulating UHSLC series, so the risk map moves with the data.",
+  "Roadmap: an alert when a gauge's observed anomaly exceeds its 1-in-N level (needs a datum tie between UHSLC and the BoM series)."
+ ],
+ "delivery": {
+  "intro": "How I would take your platform from idea to launch without an in-house tech lead. Each step lists what I do, what you see, and where the same step is visible in my own work.",
+  "stages": [
+   {
+    "t": "Discovery and scope",
+    "do": "Agree the users, the one job the first release must do, and what is out of scope. Write down data owners and constraints.",
+    "see": "A one-page scope and a list of open decisions with who owns each.",
+    "evidence": [
+     {
+      "label": "Decisions written into the site itself: what the probability means and does not mean",
+      "url": "https://yanlong-iao.github.io/SeaLevelLab/walkthrough.html"
+     }
+    ]
+   },
+   {
+    "t": "Architecture and stack, with trade-offs",
+    "do": "Pick the simplest stack that meets the need, and say what would make us change it.",
+    "see": "A short architecture note: components, hosting, costs, and the trigger for the next step up.",
+    "evidence": [
+     {
+      "label": "Static site + scheduled job + SQLite instead of a server, and when that would change (this page)",
+      "url": "#flow"
+     }
+    ]
+   },
+   {
+    "t": "Integrations plan",
+    "do": "List every external system, how we call it, auth, limits, failure handling and licence, before writing code against it.",
+    "see": "An integrations table like the one on this page, kept in the repository.",
+    "evidence": [
+     {
+      "label": "integrations.json behind this page",
+      "url": "https://github.com/yanlong-iao/SeaLevelLab/blob/main/docs/data/integrations.json"
+     },
+     {
+      "label": "Gauge mapping with basis and confidence",
+      "url": "https://github.com/yanlong-iao/SeaLevelLab/blob/main/etl/station_map.json"
+     }
+    ]
+   },
+   {
+    "t": "Build in small releases",
+    "do": "Ship something usable every few days, each change small enough to review and roll back.",
+    "see": "A working link after every release, not a big reveal at the end.",
+    "evidence": [
+     {
+      "label": "Commit history: each commit is one shippable change",
+      "url": "https://github.com/yanlong-iao/SeaLevelLab/commits/main"
+     }
+    ]
+   },
+   {
+    "t": "Testing and CI",
+    "do": "Automated tests on every push for the parts that would hurt if they broke: data parsing, maths, failure paths.",
+    "see": "A green check on every change; failures block the release.",
+    "evidence": [
+     {
+      "label": "CI runs",
+      "url": "https://github.com/yanlong-iao/SeaLevelLab/actions/workflows/ci.yml"
+     },
+     {
+      "label": "ETL tests (failure policy, idempotency)",
+      "url": "https://github.com/yanlong-iao/SeaLevelLab/blob/main/etl/tests/test_live_sealevel.py"
+     }
+    ]
+   },
+   {
+    "t": "Deploy and monitoring",
+    "do": "Automated deploys, scheduled jobs, a visible health indicator, and a rollback point before every major change.",
+    "see": "A status indicator and a run history you can check without asking me.",
+    "evidence": [
+     {
+      "label": "Daily data workflow runs",
+      "url": "https://github.com/yanlong-iao/SeaLevelLab/actions/workflows/live-data.yml"
+     },
+     {
+      "label": "Run history on this page",
+      "url": "#status"
+     }
+    ]
+   },
+   {
+    "t": "Handover and documentation",
+    "do": "A README that runs from a clean machine, plain-language pages for non-technical readers, and no knowledge that lives only in my head.",
+    "see": "Someone else can run, change and deploy it.",
+    "evidence": [
+     {
+      "label": "README with run commands",
+      "url": "https://github.com/yanlong-iao/SeaLevelLab#readme"
+     },
+     {
+      "label": "Engineering report",
+      "url": "https://yanlong-iao.github.io/SeaLevelLab/report.html"
+     }
+    ]
+   },
+   {
+    "t": "Working with specialists, no tech lead",
+    "do": "Turn technical choices into short options with costs for you to decide; give designers, content owners and vendors clear inputs and deadlines; flag risks early in writing.",
+    "see": "Weekly written update: done, next, decisions needed from you, risks.",
+    "evidence": [
+     {
+      "label": "Honesty notes on data limits, written for non-specialists",
+      "url": "https://yanlong-iao.github.io/SeaLevelLab/"
+     }
+    ]
+   }
+  ],
+  "first_two_weeks": [
+   {
+    "d": "Days 1-2",
+    "t": "Read everything that exists; talk to you and each specialist; list users, the first release's one job, systems to integrate, and open decisions."
+   },
+   {
+    "d": "Days 3-4",
+    "t": "Architecture note and integrations table; test access to each third-party system (keys, sandboxes, rate limits, CORS)."
+   },
+   {
+    "d": "Day 5",
+    "t": "Repository, CI, staging deploy and a skeleton site live on a link you can open. First weekly update."
+   },
+   {
+    "d": "Week 2",
+    "t": "First end-to-end slice: one real user flow, through one real integration, into the database and back to the screen, with tests and monitoring. Demo on Friday; agree the next slice."
+   }
+  ]
+ },
+ "status": {
+  "file": "live/status.json",
+  "workflow": "https://github.com/yanlong-iao/SeaLevelLab/actions/workflows/live-data.yml"
+ },
+ "probes": [
+  {
+   "id": "openmeteo",
+   "label": "Open-Meteo: 7-day sea-level forecast for Funafuti, Tuvalu",
+   "url": "https://marine-api.open-meteo.com/v1/marine?latitude=-8.5033&longitude=179.2100&hourly=sea_level_height_msl&forecast_days=7&timezone=GMT",
+   "expect": "ok",
+   "why": "Open-Meteo allows calls from any web page (CORS: *), so the map refreshes the forecast live.",
+   "done": "this is the same call the map makes when you open a gauge"
+  },
+  {
+   "id": "uhslc",
+   "label": "UHSLC: last 50 days of hourly readings at Funafuti, called straight from this page",
+   "url": "https://uhslc.soest.hawaii.edu/erddap/tabledap/global_hourly_fast.json?time,sea_level&uhslc_id=25&time>={since50}",
+   "expect": "blocked",
+   "why": "UHSLC's server does not send a CORS header, so browsers refuse to hand the answer to a web page. This is why the gauges come through the nightly server-side job instead."
+  }
+ ],
+ "flows": [
+  {
+   "title": "1 · Live pipeline, every day",
+   "note": "A scheduled job calls two public APIs, checks the answers, stores them in a database and publishes small files the site reads. The forecast is also fetched live from your browser.",
+   "mermaid": "flowchart LR\n  UH[\"UHSLC tide gauges<br/>REST API · hourly\"] -- \"HTTPS GET<br/>timeout + retry\" --> ETL\n  OM[\"Open-Meteo Marine<br/>REST API · 7-day forecast\"] -- \"HTTPS GET<br/>timeout + retry\" --> ETL\n  ETL[\"Daily job<br/>GitHub Actions<br/>validate · upsert\"] --> DB[(\"SQLite<br/>4 tables\")]\n  DB -- \"export<br/>if changed\" --> J[(\"live_data.json<br/>status.json\")]\n  J --> UI[\"Map: Live data tab<br/>Home: status badge\"]\n  OM -. \"live, from the browser\" .-> UI"
+  },
+  {
+   "title": "2 · Model pipeline, at build time",
+   "note": "The historical archive is cleaned once, a spatial statistical model is fitted, and its output is baked into the map. The Python lab and its optional LLM agent work from the same table.",
+   "mermaid": "flowchart LR\n  BOM[\"BoM monthly files<br/>13 countries, 1992-2025\"] -- \"download<br/>clean, merge\" --> CSV[(\"Processed_Final_data.csv\")]\n  CSV --> R[\"R build<br/>INLA · GP · GEV\"] --> AD[(\"app_data.js<br/>model fields\")] --> MAP[\"Interactive map\"]\n  TL[\"Map tiles<br/>Esri · CARTO · OSM\"] -- \"tile URLs\" --> MAP\n  CSV --> PY[\"Python lab<br/>twin · BO · PPO\"]\n  LLM[\"LLM endpoint<br/>OpenAI-compatible\"] -. \"function calling<br/>own key\" .-> PY"
+  }
+ ]
+}
