@@ -27,6 +27,7 @@
 .sl-links a{color:#5a6b78;text-decoration:none;padding:6px 10px;border-radius:4px;display:inline-flex;align-items:center;gap:6px}
 .sl-links a:hover{background:#eef3f6;color:#1b2a33}
 .sl-links a.on{color:#0e6f82;font-weight:600;background:#e6f2f5}
+.sl-live{font-size:10px;color:#1d6b3f;background:#e3f3ea;border-radius:3px;padding:1px 5px;font-weight:600}
 .sl-tag{font-size:10.5px;color:#8a2f18;background:#fbe6df;border-radius:3px;padding:1px 5px;font-weight:500}
 
   main { max-width: 980px; margin: 0 auto; padding: 28px 18px 60px; }
@@ -58,11 +59,20 @@
   .disc { background:#fff; border-left:3px solid var(--tide); border-radius:0 6px 6px 0; padding:12px 16px; font-size:.9rem; color:var(--muted); margin:22px 0; }
   footer { color:var(--muted); font-size:.85rem; margin-top:30px; }
   footer a { color:var(--tide); }
-  @media (max-width: 700px) { .grid { grid-template-columns:1fr; } .hero { padding:22px 18px; } .sub { display:block; margin:12px 0 0; } }
+  .status { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:20px 0 0; padding:10px 14px; border:1px solid var(--line); border-radius:6px; background:#fbfcfd; font-size:.88rem; color:var(--muted); text-decoration:none; }
+  .status:hover { border-color:var(--tide); }
+  .status i { width:9px; height:9px; border-radius:50%; background:#b9c4cb; flex:none; }
+  .status.ok i { background:#2e9d5b; box-shadow:0 0 0 4px rgba(46,157,91,.16); }
+  .status.bad i { background:#d2573a; }
+  .status b { color:var(--ink); font-weight:600; }
+  .status .go { margin-left:auto; color:var(--tide); white-space:nowrap; }
+  .entry.new { border-color:#9fd0b4; }
+  .entry .pill { display:inline-block; margin-left:6px; font-size:.72rem; color:#1d6b3f; background:#e3f3ea; border-radius:3px; padding:0 6px; font-weight:600; vertical-align:2px; }
+  @media (max-width: 700px) { .status .go { margin-left:0; } .grid { grid-template-columns:1fr; } .hero { padding:22px 18px; } .sub { display:block; margin:12px 0 0; } }
 </style>
 </head>
 <body>
-<nav class="sl-nav" aria-label="Site"><a class="sl-brand" href="./">SeaLevelLab</a><div class="sl-links"><a href="./" class="on">Overview</a><a href="walkthrough.html">Walkthrough</a><a href="app.html">Interactive map</a><a href="report.html">Engineering report</a><a href="demo.html">Full analysis <span class="sl-tag">~10 MB, slow on mobile</span></a><a href="https://github.com/yanlong-iao/SeaLevelLab" target="_blank" rel="noopener">GitHub</a></div></nav>
+<nav class="sl-nav" aria-label="Site"><a class="sl-brand" href="./">SeaLevelLab</a><div class="sl-links"><a href="./" class="on">Overview</a><a href="walkthrough.html">Walkthrough</a><a href="app.html">Interactive map</a><a href="report.html">Engineering report</a><a href="demo.html">Full analysis <span class="sl-tag">~10 MB, slow on mobile</span></a><a href="integrations.html">Data &amp; integrations <span class="sl-live">live</span></a><a href="https://github.com/yanlong-iao/SeaLevelLab" target="_blank" rel="noopener">GitHub</a></div></nav>
 <main>
   <section class="hero">
     <div class="eyebrow">Pacific sea level · self-driving-lab intelligence layer</div>
@@ -76,6 +86,7 @@
     </ul>
     <a class="cta" href="app.html">Open the interactive map <small>→</small></a>
     <span class="sub">Works on phones. Click any point for a local 3D view. New to the project? <a href="walkthrough.html">Read the seven-step walkthrough</a>.</span>
+    <a class="status" id="status" href="integrations.html#status"><i></i><span id="status-t"><b>Live data</b> · checking the pipeline…</span><span class="go">Data &amp; integrations →</span></a>
   </section>
 
   <figure>
@@ -84,6 +95,7 @@
   </figure>
 
   <div class="entries">
+    <a class="entry new" href="integrations.html"><b>Data &amp; integrations<span class="pill">live</span></b><span>Where every number comes from: BoM archive, two live APIs (UHSLC tide gauges, Open-Meteo forecast), a daily ETL into SQLite, and how a request flows.</span></a>
     <a class="entry" href="app.html"><b>Interactive map</b><span>Exceedance probability for any year and baseline; click for the local 3D surface and the nearest gauge's GEV fit.</span></a>
     <a class="entry" href="walkthrough.html"><b>How it works</b><span>Seven steps: the data and its datum trap, the INLA SPDE fit, why that field is a BO surrogate, the belief-MDP, the benchmark, the GEV risk model, and the limits.</span></a><a class="entry" href="report.html"><b>Engineering report</b><span>Math bridge from INLA to Gaussian-process surrogates, MDP design, agent workflow, benchmark, interview pitch.</span></a>
     <a class="entry" href="demo.html"><b>Full analysis</b><span>The complete Quarto notebook: INLA fit, GP from scratch, twin, BO loop, animated belief map.</span><span class="warn">~10 MB, slow on mobile</span></a>
@@ -107,5 +119,17 @@
 
   <footer>SeaLevelLab · MIT licence · <a href="https://github.com/yanlong-iao/SeaLevelLab">github.com/yanlong-iao/SeaLevelLab</a></footer>
 </main>
+<script src="live.js"></script>
+<script>
+(function () {
+  var el = document.getElementById("status"), t = document.getElementById("status-t");
+  if (!window.fetch) return;
+  fetch("live/status.json", { cache: "no-cache" }).then(function (r) { if (!r.ok) throw 0; return r.json(); }).then(function (st) {
+    var l = SLLive.statusLine(st);
+    el.classList.add(l.ok ? "ok" : "bad");
+    t.innerHTML = "<b>Live data</b> · last pipeline run " + l.run + " (" + l.runAbs + ") · " + l.stations + " gauges updated · observations to " + l.obsTo + " · 7-day forecast";
+  }).catch(function () { t.innerHTML = "<b>Live data</b> · status unavailable right now"; });
+})();
+</script>
 </body>
 </html>

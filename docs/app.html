@@ -28,6 +28,7 @@
 .sl-links a{color:#5a6b78;text-decoration:none;padding:6px 10px;border-radius:4px;display:inline-flex;align-items:center;gap:6px}
 .sl-links a:hover{background:#eef3f6;color:#1b2a33}
 .sl-links a.on{color:#0e6f82;font-weight:600;background:#e6f2f5}
+.sl-live{font-size:10px;color:#1d6b3f;background:#e3f3ea;border-radius:3px;padding:1px 5px;font-weight:600}
 .sl-tag{font-size:10.5px;color:#8a2f18;background:#fbe6df;border-radius:3px;padding:1px 5px;font-weight:500}
   .leaflet-container { font:inherit; }
   .st-label { background:rgba(255,255,255,.85); border:1px solid var(--line); border-radius:3px; padding:1px 5px; font-size:11px; color:var(--ink); box-shadow:none; }
@@ -76,7 +77,28 @@
   .hint { color:var(--muted); font-size:12.5px; }
   h3 { font-size:12.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin:14px 0 6px; }
   .loading { display:flex; align-items:center; justify-content:center; height:100%; color:var(--muted); font-size:13px; background:#f7f9fa; border:1px dashed var(--line); border-radius:6px; }
+  /* ---- live data tab ---- */
+  #tab-live .dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:#2e9d5b; margin-right:5px; vertical-align:1px; }
+  .lv-head { font-size:13px; color:var(--muted); margin:0 0 4px; } .lv-head b { color:var(--ink); }
+  .lv-conf { font-size:11px; border-radius:3px; padding:1px 6px; margin-left:4px; cursor:help; }
+  .lv-confirmed { background:#e3f3ea; color:#1d6b3f; } .lv-likely { background:#fff4dc; color:#7a5300; }
+  .lv-chart { width:100%; height:190px; display:block; background:#fbfcfd; border:1px solid var(--line); border-radius:5px; }
+  .lv-grid { stroke:#e3e9ed; stroke-width:1; } .lv-zero { stroke:#9fb0bb; stroke-width:1; stroke-dasharray:3 3; }
+  .lv-tick { font-size:10.5px; fill:#6b7c88; font-family:inherit; }
+  .lv-line { fill:none; stroke-width:1.4; vector-effect:non-scaling-stroke; } .lv-obs { stroke:#0e6f82; } .lv-fc-line { stroke:#d2573a; }
+  .lv-meta { font-size:12px; color:var(--muted); margin:6px 0 4px; line-height:1.5; } .lv-meta a, .lv-pipe a, .lv-note a { color:var(--tide); }
+  .lv-tag { display:inline-block; font-size:11px; border-radius:3px; padding:0 6px; background:#eef3f6; color:var(--muted); font-weight:600; }
+  .lv-live { background:#e3f3ea; color:#1d6b3f; } .lv-warn { background:#fbe6df; color:#8a2f18; }
+  .lv-stale { font-size:11px; color:#8a2f18; background:#fbe6df; border-radius:3px; padding:0 5px; }
+  .lv-note { background:#f3f6f8; border-left:3px solid var(--tide); padding:8px 10px; font-size:12px; color:#34444f; margin:12px 0 8px; line-height:1.5; }
+  .lv-pipe { font-size:11.5px; color:var(--muted); margin:6px 0 2px; }
+  .lv-empty { padding:30px; text-align:center; color:var(--muted); font-size:13px; }
+  #live-strip { display:flex; align-items:center; gap:6px; margin-top:8px; font-size:11.5px; color:var(--muted); text-decoration:none; border-top:1px solid var(--line); padding-top:7px; }
+  #live-strip:hover { color:var(--ink); }
+  #live-strip i { width:7px; height:7px; border-radius:50%; background:#b9c4cb; flex:none; }
+  #live-strip.ok i { background:#2e9d5b; box-shadow:0 0 0 3px rgba(46,157,91,.18); }
   @media (max-width: 820px) {
+    #live-strip { margin-top:5px; padding-top:5px; }
     #panel { width:100%; min-width:0; max-width:none; }
     /* narrow screens: the controls become a bottom bar so the map stays clear */
     #controls { top:auto; bottom:0; left:0; right:0; width:auto; border-radius:0; border-width:1px 0 0; padding:8px 12px 10px; box-shadow:0 -2px 8px rgba(0,0,0,.10); }
@@ -123,7 +145,7 @@
 </style>
 </head>
 <body>
-<nav class="sl-nav" aria-label="Site"><a class="sl-brand" href="./">SeaLevelLab</a><div class="sl-links"><a href="./">Overview</a><a href="walkthrough.html">Walkthrough</a><a href="app.html" class="on">Interactive map</a><a href="report.html">Engineering report</a><a href="demo.html">Full analysis <span class="sl-tag">~10 MB, slow on mobile</span></a><a href="https://github.com/yanlong-iao/SeaLevelLab" target="_blank" rel="noopener">GitHub</a></div></nav>
+<nav class="sl-nav" aria-label="Site"><a class="sl-brand" href="./">SeaLevelLab</a><div class="sl-links"><a href="./">Overview</a><a href="walkthrough.html">Walkthrough</a><a href="app.html" class="on">Interactive map</a><a href="report.html">Engineering report</a><a href="demo.html">Full analysis <span class="sl-tag">~10 MB, slow on mobile</span></a><a href="integrations.html">Data &amp; integrations <span class="sl-live">live</span></a><a href="https://github.com/yanlong-iao/SeaLevelLab" target="_blank" rel="noopener">GitHub</a></div></nav>
 <div id="map" aria-label="Map of the tropical Pacific study region"></div>
 
 <div id="controls">
@@ -137,6 +159,7 @@
   </div>
   <div class="note">Colour = probability for the chosen year and baseline. Opacity = data support from the 13 gauges; faint cells have reverted to the prior. Click anywhere for the local 3D view.</div>
   <button id="tour-start">▶︎  Guided tour · 9 steps</button>
+  <a id="live-strip" href="integrations.html" title="Daily pipeline: UHSLC tide gauges + Open-Meteo forecast"><i></i><span>Live data: loading status…</span></a>
   <div id="offline">offline basemap &mdash; tiles unavailable, showing coastline only</div>
 </div>
 <div id="hint">Click the map to query a location</div>
@@ -161,6 +184,7 @@
   <div id="tabs">
     <button id="tab-point" class="on">Point</button>
     <button id="tab-station">Station</button>
+    <button id="tab-live"><span class="dot"></span>Live data</button>
   </div>
   <section id="pane-point" class="tabpane on">
     <div class="big" id="p-big">&ndash;</div>
@@ -189,12 +213,14 @@
       <dt>Shape &xi; (shared)</dt><dd id="s-xi"></dd>
     </dl>
   </section>
+  <section id="pane-live" class="tabpane"><div id="live-body"><div class="loading" style="height:160px">Loading live data…</div></div></section>
   <div class="disc"><b>What this is.</b> The probability that a station's annual maximum sea level exceeds the level that had a 1-in-N chance per year around 2000, in that station's own datum. The project holds no DEM and no absolute elevations, so this is not a probability that any land is flooded. Rise rate and GEV scale between gauges come from a Gaussian-process interpolation; &xi; is a shared GEV shape.</div>
 </aside>
 
 <script src="vendor/leaflet.js"></script>
 <script src="app_math.js"></script>
 <script src="app_data.js"></script>
+<script src="live.js"></script>
 <script>
 (function () {
   "use strict";
@@ -354,7 +380,7 @@
       state.station = nearIdx; state.stationDistKm = nearD; state.stationClicked = false;
     } else { state.stationDistKm = 0; state.stationClicked = true; }
     document.getElementById("tab-station").textContent = (state.stationClicked ? "Station: " : "Nearest gauge: ") + D.stations[state.station].Location;
-    showTab("point");
+    showTab(state.stationClicked && document.getElementById("tab-live").classList.contains("on") ? "live" : "point");
     fillPoint(); draw3d(); fillStation();
     panel.classList.add("open");
     /* keep the clicked point visible left of the panel */
@@ -367,14 +393,41 @@
   }
   document.getElementById("close").addEventListener("click", closePanel);
   function showTab(which) {
-    document.getElementById("tab-point").classList.toggle("on", which === "point");
-    document.getElementById("tab-station").classList.toggle("on", which === "station");
-    document.getElementById("pane-point").classList.toggle("on", which === "point");
-    document.getElementById("pane-station").classList.toggle("on", which === "station");
-    if (which === "point") draw3d(); else fillStation();
+    ["point", "station", "live"].forEach(function (w) {
+      document.getElementById("tab-" + w).classList.toggle("on", which === w);
+      document.getElementById("pane-" + w).classList.toggle("on", which === w);
+    });
+    if (which === "point") draw3d(); else if (which === "station") fillStation(); else fillLive();
   }
   document.getElementById("tab-point").addEventListener("click", function () { showTab("point"); });
   document.getElementById("tab-station").addEventListener("click", function () { showTab("station"); });
+  document.getElementById("tab-live").addEventListener("click", function () { showTab("live"); });
+
+  /* ------------------------------------------------------------------ live tab: UHSLC observations + Open-Meteo forecast (docs/live.js) */
+  var liveBody = document.getElementById("live-body");
+  function fillLive() {
+    if (state.station === null || !window.SLLive) return;
+    var loc = D.stations[state.station].Location;
+    if (liveBody.getAttribute("data-loc") === loc && liveBody.querySelector("svg")) return;   // already showing this gauge
+    liveBody.setAttribute("data-loc", loc);
+    SLLive.load().then(function (data) {
+      if (liveBody.getAttribute("data-loc") === loc) SLLive.renderPane(liveBody, data, loc);
+    }, function (e) {
+      liveBody.innerHTML = '<p class="hint">Live data could not be loaded (' + SLLive.esc(e.message) + '). ' +
+        (location.protocol === "file:" ? "Opened from a local file: serve the folder over HTTP to see it." : "Try again later.") + '</p>';
+      liveBody.removeAttribute("data-loc");
+    });
+  }
+  (function liveStatus() {
+    var el = document.getElementById("live-strip");
+    if (!window.fetch || !window.SLLive) return;
+    fetch("live/status.json", { cache: "no-cache" }).then(function (r) { return r.json(); }).then(function (st) {
+      var l = SLLive.statusLine(st);
+      el.classList.toggle("ok", l.ok);
+      el.querySelector("span").innerHTML = "<b>Live data</b> · pipeline ran " + l.run + " · gauges to " + l.obsTo + " · 7-day forecast";
+      el.title = "Last successful ETL run " + l.runAbs + "; " + l.stations + " gauges updated. Click for the data pipeline.";
+    }).catch(function () { el.querySelector("span").textContent = "Live data: status unavailable"; });
+  })();
 
   function nearestStation(lon, lat) {
     var best = null;
